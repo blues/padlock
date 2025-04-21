@@ -4,9 +4,9 @@
 
 Except for this section in README.md written by @rayozzie, everything in this repo - from this document through all code and other files - was 100% vibe-coded by Ray Ozzie and his Mom (Mixture-of-Models) over the course of several days in April 2025. The notion that non-technical CEOs could vibe-code a useful and fully-baked product seems absurd. These are not serious people. Our describing a solution to the commputer *is* programming; it's precisely what we do as professionals.
 
-Of course, the level of detail in our instructions to the machine is changing dramatically. Devin, Claude Code, and Cursor are real, and I certainly never expected to be able to vibe-drive a Tesla from my driveway to Fenway in my lifetime.
+Of course, the level of detail in our instructions to the machine is changing dramatically. Devin, Claude Code, Cursor, and Codex are real, and I certainly never expected to be able to vibe-drive a Tesla from my driveway to Fenway in my lifetime.
 
-Whether as a developer or as the board member of a public company, I remain relevant by staying close-to-the-machine. And thought it best to understand the realities and limits of vibe-coding tools & techniques by taking on a project.
+Whether as a developer or as the board member of a public company, I remain relevant by staying close-to-the-machine. I'd only been using AI tools lightly while coding, but I had to do a double-take when my team at Blues did [this](https://www.tjvantoll.com/2025/03/17/vibecoding/).  And thought it best to explore the realities and test the limits of vibe-coding tools & techniques by taking on a project.
 
 Years ago, in a pre-internet peer-to-peer era, my colleagues and I found ourselves needing to physically carry media containing confidential source code across borders. I was being advised by my exec security that my hotel rooms were certainly being bugged and penetrated, and that, in two countries I was visiting, an 'evil maid' attack was not out of the question - and that I should always travel to these countries with a fresh, disposable laptop.
 
