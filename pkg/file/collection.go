@@ -1,3 +1,5 @@
+// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+
 // Package file provides the file system operations for the padlock cryptographic system.
 //
 // This package handles all interactions with the file system, including:

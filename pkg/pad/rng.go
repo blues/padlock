@@ -1,3 +1,5 @@
+// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+
 // This file contains the core random number generation functionality
 // for the padlock system.
 

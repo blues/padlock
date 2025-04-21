@@ -1,3 +1,5 @@
+// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+
 // Package padlock implements the high-level operations for encoding and decoding files
 // using the K-of-N threshold one-time-pad cryptographic scheme.
 //

@@ -1,3 +1,5 @@
+// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+
 // Package pad implements a secure K-of-N threshold one-time-pad cryptographic scheme.
 //
 // This package provides the core cryptographic functionality of the padlock system,
