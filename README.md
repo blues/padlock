@@ -28,6 +28,8 @@ While at first I began with Devin, I soon moved to ChatGPT o3-mini-high and even
 
 Grand conclusion? It was far, far too much work to rely upon these junior AI's to bring even this project to completion. With the simplicity of the project's architecture and code, combined with golang's wonderful standard libraries, I could have easily written this in an evening rather than the days it took for my Mom to help. But it did a nice job at paving the overall structure from my description. Nonetheless, great potential and it portends quite an amazing future as it turns 10x developers into 100x developers. I do worry for 1x devs.
 
+Reiterating - I haven't modified a single line of code in this repo (other than this section in this README.md) with a text editor; it's all been done by chatting with my Mom. PRs accepted for bugs, but I'd strongly prefer only to consider PR's submitted by AI's and not humans. Let's keep it pure.
+
 ## Key Features
 
 - **Threshold Security:**  
