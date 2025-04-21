@@ -38,8 +38,8 @@
 //	# Enable verbose logging for debugging
 //	padlock encode /path/to/input /path/to/output -verbose
 //
-//	# Create ZIP archives for each collection instead of directories
-//	padlock encode /path/to/input /path/to/output -zip
+//	# Create directories for each collection instead of ZIP files
+//	padlock encode /path/to/input /path/to/output -unzip
 //
 // Security considerations:
 // - Never reuse the same collections for different data (violates one-time pad security)
@@ -68,7 +68,7 @@ import (
 // After displaying the help text, it exits with status code 1.
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage:
-  padlock encode <inputDir> <outputDir> [-copies N] [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-zip]
+  padlock encode <inputDir> <outputDir> [-copies N] [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-unzip]
   padlock decode <inputDir> <outputDir> [-clear] [-verbose]
 
 Commands:
@@ -86,10 +86,10 @@ Options:
   -clear            Clear output directory if not empty
   -chunk SIZE       Maximum candidate block size in bytes (default: 2MB)
   -verbose          Enable detailed debug output
-  -zip              Create zip files for each collection instead of directories
+  -unzip            Create directories for each collection instead of zip files (default: creates zip files)
 
 Examples:
-  padlock encode ~/Documents/secret ~/Collections -copies 5 -required 3 -format png -zip
+  padlock encode ~/Documents/secret ~/Collections -copies 5 -required 3 -format png
   padlock decode ~/Collections/subset ~/Restored -clear
   padlock encode ~/Documents/top-secret ~/Collections -copies 5 -required 3 -verbose
 `)
@@ -150,7 +150,7 @@ func main() {
 		clearVal := fs.Bool("clear", false, "clear output directory if not empty")
 		chunkVal := fs.Int("chunk", 2*1024*1024, "maximum candidate block size in bytes (default: 2MB)")
 		verboseVal := fs.Bool("verbose", false, "enable detailed debug output (includes all trace information)")
-		zipVal := fs.Bool("zip", false, "create zip files for each collection instead of directories")
+		unzipVal := fs.Bool("unzip", false, "create directories for each collection instead of zip files")
 		fs.Parse(os.Args[4:])
 
 		// Validate flags
@@ -200,7 +200,7 @@ func main() {
 			ClearIfNotEmpty: *clearVal,
 			Verbose:         *verboseVal,
 			Compression:     padlock.CompressionGzip,
-			ZipCollections:  *zipVal,
+			ZipCollections:  !*unzipVal,
 		}
 
 		// Encode the directory
