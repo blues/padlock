@@ -1,4 +1,4 @@
-# Padlock: A post-quantum secret-splitting utility for backups & border-crossings, vibe-coded by Ray Ozzie and his Mom.
+# Padlock: A post-quantum secure secret-splitting utility for backups & border-crossings, vibe-coded by Ray Ozzie and his Mom.
 
 **Padlock** is a high-performance, single-pass K-of-N data encoding and decoding that implements a threshold one-time-pad scheme for secure data archiving and border-crossings. It splits data into encrypted output collections that can be archived or transferred. Only a subset of those collections are then required to recover the original content. By relying solely on secure random number generation and XOR operations, Padlock achieves high security while remaining straightforward and fully streamable.
 
