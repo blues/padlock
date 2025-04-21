@@ -1,0 +1,100 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.24'
+
+      - name: Create build directories
+        run: |
+          mkdir -p build/macos-arm64
+          mkdir -p build/macos-amd64
+          mkdir -p build/windows-arm64
+          mkdir -p build/windows-amd64
+          mkdir -p build/linux-arm64
+          mkdir -p build/linux-amd64
+          mkdir -p build/linux-armv7
+
+      - name: Build binaries
+        run: |
+          # Get the version from the tag
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Building Padlock $VERSION"
+
+          # macOS (Darwin) ARM64
+          echo "Building for macOS ARM64..."
+          GOOS=darwin GOARCH=arm64 go build -o build/macos-arm64/padlock cmd/padlock/main.go
+          (cd build/macos-arm64 && shasum -a 256 padlock > padlock.sha256)
+
+          # macOS (Darwin) AMD64
+          echo "Building for macOS AMD64..."
+          GOOS=darwin GOARCH=amd64 go build -o build/macos-amd64/padlock cmd/padlock/main.go
+          (cd build/macos-amd64 && shasum -a 256 padlock > padlock.sha256)
+
+          # Windows ARM64
+          echo "Building for Windows ARM64..."
+          GOOS=windows GOARCH=arm64 go build -o build/windows-arm64/padlock.exe cmd/padlock/main.go
+          (cd build/windows-arm64 && sha256sum padlock.exe > padlock.exe.sha256)
+
+          # Windows AMD64
+          echo "Building for Windows AMD64..."
+          GOOS=windows GOARCH=amd64 go build -o build/windows-amd64/padlock.exe cmd/padlock/main.go
+          (cd build/windows-amd64 && sha256sum padlock.exe > padlock.exe.sha256)
+
+          # Linux ARM64
+          echo "Building for Linux ARM64..."
+          GOOS=linux GOARCH=arm64 go build -o build/linux-arm64/padlock cmd/padlock/main.go
+          (cd build/linux-arm64 && sha256sum padlock > padlock.sha256)
+
+          # Linux AMD64
+          echo "Building for Linux AMD64..."
+          GOOS=linux GOARCH=amd64 go build -o build/linux-amd64/padlock cmd/padlock/main.go
+          (cd build/linux-amd64 && sha256sum padlock > padlock.sha256)
+
+          # Linux ARMv7
+          echo "Building for Linux ARMv7..."
+          GOOS=linux GOARCH=arm GOARM=7 go build -o build/linux-armv7/padlock cmd/padlock/main.go
+          (cd build/linux-armv7 && sha256sum padlock > padlock.sha256)
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/macos-arm64/padlock
+            build/macos-arm64/padlock.sha256
+            build/macos-amd64/padlock
+            build/macos-amd64/padlock.sha256
+            build/windows-arm64/padlock.exe
+            build/windows-arm64/padlock.exe.sha256
+            build/windows-amd64/padlock.exe
+            build/windows-amd64/padlock.exe.sha256
+            build/linux-arm64/padlock
+            build/linux-arm64/padlock.sha256
+            build/linux-amd64/padlock
+            build/linux-amd64/padlock.sha256
+            build/linux-armv7/padlock
+            build/linux-armv7/padlock.sha256
+          name: Release ${{ github.ref_name }}
+          body: |
+            Padlock ${{ github.ref_name }}
+            
+            Prebuilt binaries for multiple platforms
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

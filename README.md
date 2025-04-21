@@ -2,7 +2,7 @@
 
 **Padlock** is a high-performance, single-pass K-of-N data encoding and decoding that implements a threshold one-time-pad scheme for secure data archiving and border-crossings. It splits data into encrypted output collections that can be archived or transferred. Only a subset of those collections are then required to recover the original content. By relying solely on secure random number generation and XOR operations, Padlock achieves high security while remaining straightforward and fully streamable.
 
-Ray Ozzie comment: Except for these several paragraphs comment, everything in this repo - from this document through all code and other files - was 100% vibe-coded by Ray Ozzie and his Mom (Mixture-of-Models) over the course of several days in April 2025. The notion that non-technical CEOs could vibe-code a useful and fully-baked product seems absurd. These are not serious people. Our describing a solution to the commputer *is* programming; it's precisely what we do as professionals.
+Except for this section in README.md written by @rayozzie, everything in this repo - from this document through all code and other files - was 100% vibe-coded by Ray Ozzie and his Mom (Mixture-of-Models) over the course of several days in April 2025. The notion that non-technical CEOs could vibe-code a useful and fully-baked product seems absurd. These are not serious people. Our describing a solution to the commputer *is* programming; it's precisely what we do as professionals.
 
 Of course, the level of detail in our instructions to the machine is changing dramatically. Devin, Claude Code, and Cursor are real, and I certainly never expected to be able to vibe-drive a Tesla from my driveway to Fenway in my lifetime.
 
@@ -29,6 +29,20 @@ While at first I began with Devin, I soon moved to ChatGPT o3-mini-high and even
 Grand conclusion? It was far, far too much work to rely upon these junior AI's to bring even this project to completion. With the simplicity of the project's architecture and code, combined with golang's wonderful standard libraries, I could have easily written this in an evening rather than the days it took for my Mom to help. But it did a nice job at paving the overall structure from my description. Nonetheless, great potential and it portends quite an amazing future as it turns 10x developers into 100x developers. I do worry for 1x devs.
 
 Reiterating - I haven't modified a single line of code in this repo (other than this section in this README.md) with a text editor; it's all been done by chatting with my Mom. PRs accepted for bugs, but I'd strongly prefer only to consider PR's submitted by AI's and not humans. Let's keep it pure.
+
+## Download
+
+Pre-built binaries are available for the following platforms:
+
+| Platform | Architecture | Download | SHA256 |
+|----------|-------------|----------|--------|
+| macOS | ARM64 | [padlock](https://github.com/blues/padlock/releases/latest/download/padlock-macos-arm64) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-macos-arm64.sha256) |
+| macOS | AMD64 | [padlock](https://github.com/blues/padlock/releases/latest/download/padlock-macos-amd64) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-macos-amd64.sha256) |
+| Windows | ARM64 | [padlock.exe](https://github.com/blues/padlock/releases/latest/download/padlock-windows-arm64.exe) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-windows-arm64.exe.sha256) |
+| Windows | AMD64 | [padlock.exe](https://github.com/blues/padlock/releases/latest/download/padlock-windows-amd64.exe) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-windows-amd64.exe.sha256) |
+| Linux | ARM64 | [padlock](https://github.com/blues/padlock/releases/latest/download/padlock-linux-arm64) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-linux-arm64.sha256) |
+| Linux | AMD64 | [padlock](https://github.com/blues/padlock/releases/latest/download/padlock-linux-amd64) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-linux-amd64.sha256) |
+| Linux | ARMv7 | [padlock](https://github.com/blues/padlock/releases/latest/download/padlock-linux-armv7) | [SHA256](https://github.com/blues/padlock/releases/latest/download/padlock-linux-armv7.sha256) |
 
 ## Key Features
 
