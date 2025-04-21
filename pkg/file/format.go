@@ -1,3 +1,5 @@
+// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+
 // Package file provides utilities for file and directory management in the padlock system.
 //
 // This package implements various file handling operations critical to the padlock
