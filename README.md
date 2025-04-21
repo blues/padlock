@@ -274,19 +274,8 @@ The K-of-N threshold scheme is built on rigorous combinatorial mathematics:
 
 The mathematical elegance of this system lies in its perfect balance between redundancy and security. With exactly K-1 collections, an attacker gains absolutely zero information about the data - not just computational difficulty, but mathematical impossibility. This property holds regardless of computing power, including theoretical quantum computers, making it a future-proof security approach for protecting critical data.
 
-## Documentation
+### Documentation (courtesy of Devin)
 
-Padlock comes with comprehensive documentation available in two formats:
-
-### GitHub Pages Documentation (courtesy of Devin)
-
-Visit our documentation site: [https://blues.github.io/padlock/](https://blues.github.io/padlock/)
-
-### Local Documentation Files
-
-Alternatively, you can directly access the Markdown documentation files:
-
-- [Home](docs/wiki/Home.md) - Introduction and navigation
 - [Overview](docs/wiki/Overview.md) - High-level overview of the Padlock system
 - [Architecture](docs/wiki/Architecture.md) - Technical architecture details
 - [Usage Guide](docs/wiki/Usage-Guide.md) - Instructions for using Padlock
