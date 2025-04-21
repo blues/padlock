@@ -36,13 +36,13 @@ Pre-built binaries are available for the following platforms:
 
 | Platform | Architecture | Download | SHA256 |
 |----------|-------------|----------|--------|
-| macOS | ARM64 | [padlock](bin/macos-arm64/padlock) | [SHA256](bin/macos-arm64/padlock.sha256.txt) |
-| macOS | AMD64 | [padlock](bin/macos-amd64/padlock) | [SHA256](bin/macos-amd64/padlock.sha256.txt) |
-| Windows | ARM64 | [padlock.exe](bin/windows-arm64/padlock.exe) | [SHA256](bin/windows-arm64/padlock.exe.sha256.txt) |
-| Windows | AMD64 | [padlock.exe](bin/windows-amd64/padlock.exe) | [SHA256](bin/windows-amd64/padlock.exe.sha256.txt) |
-| Linux | ARM64 | [padlock](bin/linux-arm64/padlock) | [SHA256](bin/linux-arm64/padlock.sha256.txt) |
-| Linux | AMD64 | [padlock](bin/linux-amd64/padlock) | [SHA256](bin/linux-amd64/padlock.sha256.txt) |
-| Linux | ARMv7 | [padlock](bin/linux-armv7/padlock) | [SHA256](bin/linux-armv7/padlock.sha256.txt) |
+| macOS | ARM64 | [padlock](https://github.com/blues/padlock/raw/refs/heads/master/bin/macos-arm64/padlock) | [SHA256](bin/macos-arm64/padlock.sha256.txt) |
+| macOS | AMD64 | [padlock](https://github.com/blues/padlock/raw/refs/heads/master/bin/macos-amd64/padlock) | [SHA256](bin/macos-amd64/padlock.sha256.txt) |
+| Windows | ARM64 | [padlock.exe](https://github.com/blues/padlock/raw/refs/heads/master/bin/windows-arm64/padlock.exe) | [SHA256](bin/windows-arm64/padlock.exe.sha256.txt) |
+| Windows | AMD64 | [padlock.exe](https://github.com/blues/padlock/raw/refs/heads/master/bin/windows-amd64/padlock.exe) | [SHA256](bin/windows-amd64/padlock.exe.sha256.txt) |
+| Linux | ARM64 | [padlock](https://github.com/blues/padlock/raw/refs/heads/master/bin/linux-arm64/padlock) | [SHA256](bin/linux-arm64/padlock.sha256.txt) |
+| Linux | AMD64 | [padlock](https://github.com/blues/padlock/raw/refs/heads/master/bin/linux-amd64/padlock) | [SHA256](bin/linux-amd64/padlock.sha256.txt) |
+| Linux | ARMv7 | [padlock](https://github.com/blues/padlock/raw/refs/heads/master/bin/linux-armv7/padlock) | [SHA256](bin/linux-armv7/padlock.sha256.txt) |
 
 ## Key Features
 
