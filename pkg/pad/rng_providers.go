@@ -1,4 +1,4 @@
-// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+// Copyright 2025 Ray Ozzie and a Mixture-of-Models. All rights reserved.
 
 // This file contains implementations of various random number generator providers
 // used by the padlock system.

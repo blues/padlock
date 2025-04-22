@@ -2,7 +2,7 @@
 
 **Padlock** is a high-performance, single-pass K-of-N data encoding and decoding that implements a threshold one-time-pad scheme for secure data archiving and border-crossings. It splits data into encrypted output collections that can be archived or transferred. Only a subset of those collections are then required to recover the original content. By relying solely on secure random number generation and XOR operations, Padlock achieves high security while remaining straightforward and fully streamable.
 
-Except for this section in README.md written by @rayozzie, everything in this repo - from this document through all code and other files - was 100% vibe-coded by Ray Ozzie and his Mom (Mixture-of-Models) over the course of several days in April 2025. The notion that non-technical CEOs could vibe-code a useful and fully-baked product seems absurd. These are not serious people. Our describing a solution to the commputer *is* programming; it's precisely what we do as professionals.
+Except for this section in README.md written by @rayozzie, everything in this repo - from this document through all code and other files - was 100% vibe-coded by Ray Ozzie and his Mom (Mixture-of-models) over the course of several days in April 2025. The notion that non-technical CEOs could vibe-code a useful and fully-baked product seems absurd. These are not serious people. Our describing a solution to the commputer *is* programming; it's precisely what we do as professionals.
 
 Of course, the level of detail in our instructions to the machine is changing dramatically. Devin, Claude Code, Cursor, and Codex are real, and I certainly never expected to be able to vibe-drive a Tesla from my driveway to Fenway in my lifetime.
 

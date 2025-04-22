@@ -1,3 +1,3 @@
-// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+// Copyright 2025 Ray Ozzie and a Mixture-of-Models. All rights reserved.
 
 package pad

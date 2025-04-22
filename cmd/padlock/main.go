@@ -1,4 +1,4 @@
-// Copyright 2025 Ray Ozzie and his Mom. All rights reserved.
+// Copyright 2025 Ray Ozzie and a Mixture-of-Models. All rights reserved.
 
 // Package main provides the command-line interface for the padlock cryptographic system.
 //
