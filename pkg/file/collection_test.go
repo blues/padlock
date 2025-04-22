@@ -62,7 +62,7 @@ func TestCreateCollections(t *testing.T) {
 	}
 }
 
-func TestZipCollections(t *testing.T) {
+func TestTarCollections(t *testing.T) {
 	// Create a temporary output directory
 	tempDir, err := os.MkdirTemp("", "padlock-test-*")
 	if err != nil {
@@ -100,26 +100,27 @@ func TestZipCollections(t *testing.T) {
 		}
 	}
 
-	// Disable the actual zipping and directory removal for testing
-	origZipCollection := ZipCollection
+	// Store original functions before mocking
+	origTarCollection := TarCollection
 	origCleanupCollectionDirectory := CleanupCollectionDirectory
 
-	// Mock implementations
-	zipPaths := make([]string, len(collections))
-	zipCalled := make([]bool, len(collections))
+	// Create test variables for tracking function calls
+	tarPaths := make([]string, len(collections))
+	tarCalled := make([]bool, len(collections))
 	cleanupCalled := make([]bool, len(collections))
-
-	ZipCollection = func(ctx context.Context, collPath string) (string, error) {
+	
+	// Mock implementations
+	TarCollection = func(ctx context.Context, collPath string) (string, error) {
 		for i, coll := range collections {
 			if collPath == coll.Path {
-				zipPaths[i] = collPath + ".zip"
-				zipCalled[i] = true
-				return zipPaths[i], nil
+				tarPaths[i] = collPath + ".tar"
+				tarCalled[i] = true
+				return tarPaths[i], nil
 			}
 		}
 		return "", nil
 	}
-
+	
 	CleanupCollectionDirectory = func(ctx context.Context, collPath string) error {
 		for i, coll := range collections {
 			if collPath == coll.Path {
@@ -132,30 +133,61 @@ func TestZipCollections(t *testing.T) {
 
 	// Restore the original functions after the test
 	defer func() {
-		ZipCollection = origZipCollection
+		TarCollection = origTarCollection
 		CleanupCollectionDirectory = origCleanupCollectionDirectory
 	}()
 
-	// Call ZipCollections
-	resultPaths, err := ZipCollections(ctx, collections)
+	// Call TarCollections
+	resultPaths, err := TarCollections(ctx, collections)
 	if err != nil {
-		t.Fatalf("ZipCollections failed: %v", err)
+		t.Fatalf("TarCollections failed: %v", err)
 	}
 
-	// Verify zip paths
+	// Verify tar paths
 	for i, path := range resultPaths {
-		if path != zipPaths[i] {
-			t.Errorf("Result path %d = %s, want %s", i, path, zipPaths[i])
+		if path != tarPaths[i] {
+			t.Errorf("Result path %d = %s, want %s", i, path, tarPaths[i])
 		}
 	}
 
-	// Verify all collections were zipped and cleaned up
+	// Verify all collections were tarred and cleaned up
 	for i, coll := range collections {
-		if !zipCalled[i] {
-			t.Errorf("ZipCollection was not called for collection %s", coll.Name)
+		if !tarCalled[i] {
+			t.Errorf("TarCollection was not called for collection %s", coll.Name)
 		}
 		if !cleanupCalled[i] {
 			t.Errorf("CleanupCollectionDirectory was not called for collection %s", coll.Name)
+		}
+	}
+	
+	// Test backward compatibility - ZipCollections should call TarCollections
+	TarCollection = func(ctx context.Context, collPath string) (string, error) {
+		for i, coll := range collections {
+			if collPath == coll.Path {
+				tarPaths[i] = collPath + ".tar" // Change to make sure we can detect the call
+				tarCalled[i] = false // Reset to track new calls
+				return tarPaths[i], nil
+			}
+		}
+		return "", nil
+	}
+	
+	// Reset tracking arrays
+	for i := range tarCalled {
+		tarCalled[i] = false
+		cleanupCalled[i] = false
+	}
+	
+	// Call ZipCollections (which should now call TarCollections)
+	resultPaths, err = ZipCollections(ctx, collections)
+	if err != nil {
+		t.Fatalf("ZipCollections compatibility function failed: %v", err)
+	}
+	
+	// Verify all collections were processed by the compatibility wrapper
+	for i, path := range resultPaths {
+		if path != tarPaths[i] {
+			t.Errorf("Compatibility function result path %d = %s, want %s", i, path, tarPaths[i])
 		}
 	}
 }

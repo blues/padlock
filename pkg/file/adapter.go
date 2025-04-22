@@ -242,9 +242,9 @@ func (cw *NamedChunkWriter) Close() error {
 	return WriteNamedChunk(cw.Ctx, cw.Formatter, cw.CollPath, cw.CollName, cw.ChunkNum, cw.chunkData)
 }
 
-// ChunkReaderAdapter adapts CollectionReader to io.Reader
+// ChunkReaderAdapter adapts a CollectionReader to io.Reader
 type ChunkReaderAdapter struct {
-	Reader       *CollectionReader
+	Reader       *CollectionReader  // Standard directory/tar-based reader
 	buffer       []byte
 	offset       int
 	ctx          context.Context
@@ -287,17 +287,18 @@ func (a *ChunkReaderAdapter) Read(p []byte) (int, error) {
 
 	// If buffer is empty or fully read, get next chunk
 	if a.buffer == nil || a.offset >= len(a.buffer) {
-		log.Debugf("Getting next chunk from collection %s (chunk %d)",
-			a.Reader.Collection.Name, a.currentChunk)
+		collName := a.Reader.Collection.Name
+		
+		log.Debugf("Getting next chunk from collection %s (chunk %d)", collName, a.currentChunk)
 
 		// Make sure we reset the reader's chunk index to the one we want
 		// This ensures we only read one chunk at a time
 		a.Reader.ChunkIndex = a.currentChunk
-
 		chunk, err := a.Reader.ReadNextChunk(a.ctx)
+		
 		if err != nil {
 			if err == io.EOF {
-				log.Debugf("Reached end of chunks (EOF) for collection %s", a.Reader.Collection.Name)
+				log.Debugf("Reached end of chunks (EOF) for collection %s", collName)
 
 				// Increment currentChunk even on EOF so we're ready for the next call
 				a.currentChunk++
@@ -305,7 +306,7 @@ func (a *ChunkReaderAdapter) Read(p []byte) (int, error) {
 				return 0, io.EOF
 			} else {
 				log.Error(fmt.Errorf("error getting chunk %d from collection %s: %w",
-					a.currentChunk, a.Reader.Collection.Name, err))
+					a.currentChunk, collName, err))
 				return 0, err
 			}
 		}
@@ -313,8 +314,11 @@ func (a *ChunkReaderAdapter) Read(p []byte) (int, error) {
 		// We've successfully read the chunk, increment the chunk number for next time
 		a.currentChunk++
 
+		// Get the current chunk index for logging (subtract 1 because it was already incremented)
+		chunkIndex := a.Reader.ChunkIndex - 1
+		
 		log.Debugf("Got chunk %d (%d bytes) from collection %s",
-			a.Reader.ChunkIndex, len(chunk), a.Reader.Collection.Name)
+			chunkIndex, len(chunk), collName)
 
 		a.buffer = chunk
 		a.offset = 0

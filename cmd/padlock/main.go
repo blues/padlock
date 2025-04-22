@@ -69,8 +69,8 @@ import (
 // After displaying the help text, it exits with status code 1.
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage:
-  padlock encode <inputDir> <outputDir> [-copies N] [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-unzip]
-  padlock encode <inputDir> <outputDir1> <outputDir2> ... <outputDirN> [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-unzip]
+  padlock encode <inputDir> <outputDir> [-copies N] [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-files]
+  padlock encode <inputDir> <outputDir1> <outputDir2> ... <outputDirN> [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-files]
   padlock decode <inputDir> <outputDir> [-clear] [-verbose]
   padlock decode <inputDir1> <inputDir2> ... <inputDirN> <outputDir> [-clear] [-verbose]
 
@@ -92,7 +92,7 @@ Options:
   -clear            Clear output directories if not empty
   -chunk SIZE       Maximum candidate block size in bytes (default: 2MB)
   -verbose          Enable detailed debug output
-  -unzip            Create directories for each collection instead of zip files (default: creates zip files)
+  -files            Create individual files for each collection instead of tar archives (default: creates tar archives)
 
 Examples:
   padlock encode ~/Documents/secret ~/Collections -copies 5 -required 3 -format png
@@ -178,7 +178,7 @@ func main() {
 		clearVal := fs.Bool("clear", false, "clear output directory if not empty")
 		chunkVal := fs.Int("chunk", 2*1024*1024, "maximum candidate block size in bytes (default: 2MB)")
 		verboseVal := fs.Bool("verbose", false, "enable detailed debug output (includes all trace information)")
-		unzipVal := fs.Bool("unzip", false, "create directories for each collection instead of zip files")
+		filesVal := fs.Bool("files", false, "create individual files for each collection instead of tar archives")
 		
 		// Calculate where to start parsing flags - skip all output directories
 		flagsStartIndex := 4
@@ -251,7 +251,7 @@ func main() {
 			ClearIfNotEmpty: *clearVal,
 			Verbose:         *verboseVal,
 			Compression:     padlock.CompressionGzip,
-			ZipCollections:  !*unzipVal,
+			ArchiveCollections: !*filesVal,
 		}
 
 		// Encode the directory

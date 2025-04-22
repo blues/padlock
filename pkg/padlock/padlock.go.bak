@@ -187,7 +187,6 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		collections = make([]file.Collection, len(p.Collections))
 		for i, collName := range p.Collections {
 			// For multiple output dirs, we use the actual directory as the collection directory
-			// (not a subdirectory like in the traditional approach)
 			collections[i] = file.Collection{
 				Name: collName,
 				Path: cfg.OutputDirs[i],
@@ -246,8 +245,8 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	// Define a callback function that creates chunk writers for the encoding process
 	// Each time the pad encoder needs to write a chunk, this function is called
 	//
-	// When archive collections is enabled, this will create TarChunkWriters to write
-	// chunks directly to TAR files instead of temporary files on disk.
+	// When zip collections is enabled, this will create ZipChunkWriters to write
+	// chunks directly to ZIP files instead of temporary files on disk.
 	newChunkFunc := func(collectionName string, chunkNumber int, chunkFormat string) (io.WriteCloser, error) {
 		// Find the collection path for the given collection name
 		var collPath string
@@ -267,21 +266,12 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		
 		// If archive collections is enabled, create TarChunkWriter
 		if cfg.ArchiveCollections {
-			// Handle TAR path differently based on single vs multiple output dirs
-			var tarPath string
-			
-			if len(cfg.OutputDirs) > 1 {
-				// For multiple output directories, put the TAR inside the directory
-				tarPath = filepath.Join(collPath, collectionName+".tar")
-			} else {
-				// For single output directory, put TAR next to the collection directory
-				tarPath = collPath
-				if !strings.HasSuffix(tarPath, ".tar") {
-					tarPath = tarPath + ".tar"
-				}
+			// For direct TAR output, create or reuse a TarChunkWriter
+			// The tar path will be the collection path with .tar extension
+			tarPath := collPath
+			if !strings.HasSuffix(tarPath, ".tar") {
+				tarPath = tarPath + ".tar"
 			}
-			
-			log.Debugf("Preparing to write to TAR file at: %s", tarPath)
 			
 			// Create the TarChunkWriter for this chunk if it doesn't exist yet
 			tarWriter, err := file.NewTarChunkWriter(ctx, tarPath, collectionName, cfg.Format)
@@ -335,30 +325,24 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		}
 		log.Debugf("All TAR writers finalized successfully")
 		
-		// For single output directory, we might have empty directories to clean up
-		// but for multiple output directories, we should leave directories alone
-		if len(cfg.OutputDirs) <= 1 {
-			log.Debugf("Cleaning up empty collection directories after creating TAR files")
-			for _, coll := range collections {
-				// Only remove if it's a directory and not a TAR file
-				if !strings.HasSuffix(coll.Path, ".tar") {
-					info, err := os.Stat(coll.Path)
-					if err == nil && info.IsDir() {
-						if err := os.RemoveAll(coll.Path); err != nil {
-							log.Debugf("Warning: Failed to remove collection directory: %s (%v)", coll.Path, err)
-						} else {
-							log.Debugf("Removed collection directory: %s", coll.Path)
-						}
+		// Clean up the empty collection directories that were created
+		// since we're using direct TAR creation instead of directories
+		log.Debugf("Cleaning up empty collection directories after creating TAR files")
+		for _, coll := range collections {
+			// Only remove if it's a directory and not a TAR file
+			if !strings.HasSuffix(coll.Path, ".tar") {
+				info, err := os.Stat(coll.Path)
+				if err == nil && info.IsDir() {
+					if err := os.RemoveAll(coll.Path); err != nil {
+						log.Debugf("Warning: Failed to remove collection directory: %s (%v)", coll.Path, err)
+					} else {
+						log.Debugf("Removed collection directory: %s", coll.Path)
 					}
 				}
 			}
 		}
-	} else if len(cfg.OutputDirs) > 1 && !cfg.ArchiveCollections {
-		// For multiple output directories with files mode, do nothing extra
-		// Just leave the files in the directories as they were created
-		log.Debugf("Using files mode with multiple directories - keeping files in place")
 	} else if len(cfg.OutputDirs) > 1 {
-		// For multiple output directories with archive mode, create tar archives in each directory
+		// For multiple output directories, create tar archives within each directory
 		// but don't delete the directories (just archive the contents)
 		for _, coll := range collections {
 			tarPath, err := file.TarDirectoryContents(ctx, coll.Path, coll.Name)
@@ -368,13 +352,8 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 			}
 			log.Infof("Created tar archive for collection %s: %s", coll.Name, tarPath)
 		}
-	} else if !cfg.ArchiveCollections {
-		// For single output directory with files mode, do nothing extra
-		// Just leave the files in the directories as they were created
-		log.Debugf("Using files mode with single directory - keeping files in place")
 	} else {
-		// Traditional approach for single output directory with archive mode
-		// Create TAR files and delete the directories
+		// Traditional approach - delete the directories after creating archives
 		if _, err := file.TarCollections(ctx, collections); err != nil {
 			return err
 		}
@@ -592,18 +571,21 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	}
 	log.Debugf("Found total of %d collections", len(allCollections))
 
-	// Create collection readers for each collection
+	// Create readers for each collection
 	// These readers handle the format-specific details of reading chunks
 	readers := make([]io.Reader, len(allCollections))
 	collReaders := make([]*file.CollectionReader, len(allCollections))
 
 	for i, coll := range allCollections {
+		// Create a collection reader
 		collReader := file.NewCollectionReader(coll)
 		collReaders[i] = collReader
-
+		
 		// Create an adapter that converts the CollectionReader to an io.Reader
-		// This adapter handles the details of reading chunks sequentially
-		readers[i] = file.NewChunkReaderAdapter(ctx, collReader)
+		chunkReader := file.NewChunkReaderAdapter(ctx, collReader)
+		
+		// Store the reader
+		readers[i] = chunkReader
 	}
 
 	// Get the number of available collections (important for pad initialization)
@@ -712,6 +694,8 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	if deserializeErr != nil {
 		return deserializeErr
 	}
+
+	// No special cleanup needed for collection readers
 
 	// Log completion information including elapsed time
 	elapsed := time.Since(start)

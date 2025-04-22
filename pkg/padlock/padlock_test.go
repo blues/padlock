@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/blues/padlock/pkg/pad"
@@ -51,16 +52,17 @@ func TestEncodeOnly(t *testing.T) {
 
 	// Encode configuration
 	encodeConfig := EncodeConfig{
-		InputDir:        inputDir,
-		OutputDir:       encodeOutputDir,
-		N:               3, // Using small N for faster test
-		K:               2, // Using small K for faster test
-		Format:          FormatBin,
-		ChunkSize:       64, // Small chunk size for faster processing
-		RNG:             pad.NewDefaultRand(ctx),
-		ClearIfNotEmpty: true,
-		Verbose:         true,
-		Compression:     CompressionNone,
+		InputDir:           inputDir,
+		OutputDir:          encodeOutputDir,
+		N:                  3, // Using small N for faster test
+		K:                  2, // Using small K for faster test
+		Format:             FormatBin,
+		ChunkSize:          64, // Small chunk size for faster processing
+		RNG:                pad.NewDefaultRand(ctx),
+		ClearIfNotEmpty:    true,
+		Verbose:            true,
+		Compression:        CompressionNone,
+		ArchiveCollections: true, // Ensure collections are archived as TAR files
 	}
 
 	// Run encode
@@ -70,27 +72,62 @@ func TestEncodeOnly(t *testing.T) {
 		t.Fatalf("Failed to encode directory: %v", err)
 	}
 
-	// Verify collections were created
-	collections, err := os.ReadDir(encodeOutputDir)
+	// Verify collections were created (filter for TAR files only when using archive mode)
+	allEntries, err := os.ReadDir(encodeOutputDir)
 	if err != nil {
 		t.Fatalf("Failed to read encoded collections: %v", err)
 	}
+	
+	// Filter for TAR files or directories based on ArchiveCollections setting
+	var collections []os.DirEntry
+	for _, entry := range allEntries {
+		name := entry.Name()
+		if encodeConfig.ArchiveCollections {
+			// In archive mode, we want only .tar files
+			if strings.HasSuffix(name, ".tar") {
+				collections = append(collections, entry)
+			}
+		} else {
+			// In directory mode, we want only directories
+			if entry.IsDir() {
+				collections = append(collections, entry)
+			}
+		}
+	}
+	
 	if len(collections) != encodeConfig.N {
 		t.Fatalf("Expected %d collections, got %d", encodeConfig.N, len(collections))
 	}
 	t.Logf("Encode completed successfully with %d collections", len(collections))
 
-	// Verify each collection has chunks
+	// Verify each collection has been archived into a tar file
 	for _, collection := range collections {
-		collPath := filepath.Join(encodeOutputDir, collection.Name())
-		collFiles, err := os.ReadDir(collPath)
-		if err != nil {
-			t.Fatalf("Failed to read collection directory %s: %v", collection.Name(), err)
+		collName := collection.Name()
+		// Check if it's a TAR file
+		if filepath.Ext(collName) == ".tar" {
+			t.Logf("Found TAR archive file: %s", collName)
+		} else {
+			// Check if it's a directory (in case ZIP mode was used)
+			collPath := filepath.Join(encodeOutputDir, collName)
+			info, err := os.Stat(collPath)
+			if err != nil {
+				t.Fatalf("Failed to stat collection %s: %v", collName, err)
+			}
+			
+			if info.IsDir() {
+				// It's a directory, check for chunk files
+				collFiles, err := os.ReadDir(collPath)
+				if err != nil {
+					t.Fatalf("Failed to read collection directory %s: %v", collName, err)
+				}
+				if len(collFiles) == 0 {
+					t.Fatalf("Collection %s has no chunk files", collName)
+				}
+				t.Logf("Collection %s has %d chunk files", collName, len(collFiles))
+			} else {
+				t.Fatalf("Collection %s is neither a TAR archive nor a directory", collName)
+			}
 		}
-		if len(collFiles) == 0 {
-			t.Fatalf("Collection %s has no chunk files", collection.Name())
-		}
-		t.Logf("Collection %s has %d chunk files", collection.Name(), len(collFiles))
 	}
 
 	t.Logf("Encode test completed successfully")

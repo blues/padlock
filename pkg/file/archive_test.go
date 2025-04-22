@@ -11,13 +11,13 @@ import (
 	"github.com/blues/padlock/pkg/trace"
 )
 
-func TestZipCollection(t *testing.T) {
+func TestTarCollection(t *testing.T) {
 	ctx := context.Background()
 	tracer := trace.NewTracer("TEST", trace.LogLevelVerbose)
 	ctx = trace.WithContext(ctx, tracer)
 
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "zip-test-*")
+	tempDir, err := os.MkdirTemp("", "tar-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -49,30 +49,30 @@ func TestZipCollection(t *testing.T) {
 		}
 	}
 
-	// Test ZipCollection
-	zipPath, err := ZipCollection(ctx, collPath)
+	// Test TarCollection
+	tarPath, err := TarCollection(ctx, collPath)
 	if err != nil {
-		t.Fatalf("ZipCollection failed: %v", err)
+		t.Fatalf("TarCollection failed: %v", err)
 	}
 
-	// Verify the zip file was created
-	expectedZipPath := filepath.Join(tempDir, collName+".zip")
-	if zipPath != expectedZipPath {
-		t.Errorf("Expected zip path '%s', got '%s'", expectedZipPath, zipPath)
+	// Verify the tar file was created
+	expectedTarPath := filepath.Join(tempDir, collName+".tar")
+	if tarPath != expectedTarPath {
+		t.Errorf("Expected tar path '%s', got '%s'", expectedTarPath, tarPath)
 	}
 
-	if _, err := os.Stat(zipPath); os.IsNotExist(err) {
-		t.Errorf("Zip file '%s' was not created", zipPath)
+	if _, err := os.Stat(tarPath); os.IsNotExist(err) {
+		t.Errorf("Tar file '%s' was not created", tarPath)
 	}
 }
 
-func TestExtractZipCollection(t *testing.T) {
+func TestExtractTarCollection(t *testing.T) {
 	ctx := context.Background()
 	tracer := trace.NewTracer("TEST", trace.LogLevelVerbose)
 	ctx = trace.WithContext(ctx, tracer)
 
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "zip-test-*")
+	tempDir, err := os.MkdirTemp("", "tar-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -104,10 +104,10 @@ func TestExtractZipCollection(t *testing.T) {
 		}
 	}
 
-	// Create a zip file
-	zipPath, err := ZipCollection(ctx, collPath)
+	// Create a tar file
+	tarPath, err := TarCollection(ctx, collPath)
 	if err != nil {
-		t.Fatalf("ZipCollection failed: %v", err)
+		t.Fatalf("TarCollection failed: %v", err)
 	}
 
 	// Remove the original collection directory to make sure we're really testing extraction
@@ -116,16 +116,16 @@ func TestExtractZipCollection(t *testing.T) {
 	}
 
 	// Create a destination directory for extraction
-	extractDir, err := os.MkdirTemp("", "zip-extract-*")
+	extractDir, err := os.MkdirTemp("", "tar-extract-*")
 	if err != nil {
 		t.Fatalf("Failed to create extract dir: %v", err)
 	}
 	defer os.RemoveAll(extractDir)
 
-	// Test ExtractZipCollection
-	extractedPath, err := ExtractZipCollection(ctx, zipPath, extractDir)
+	// Test ExtractTarCollection
+	extractedPath, err := ExtractTarCollection(ctx, tarPath, extractDir)
 	if err != nil {
-		t.Fatalf("ExtractZipCollection failed: %v", err)
+		t.Fatalf("ExtractTarCollection failed: %v", err)
 	}
 
 	// Verify the extracted directory was created
