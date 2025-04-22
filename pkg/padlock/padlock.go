@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,7 +83,8 @@ const (
 // This structure is created by the command-line interface and passed to EncodeDirectory.
 type EncodeConfig struct {
 	InputDir        string      // Path to the directory containing data to encode
-	OutputDir       string      // Path where the encoded collections will be created
+	OutputDir       string      // Path where the encoded collections will be created (for backward compatibility)
+	OutputDirs      []string    // List of output directories, one for each collection when multiple dirs are specified
 	N               int         // Total number of collections to create (N value)
 	K               int         // Minimum collections required for reconstruction (K value)
 	Format          Format      // Output format (binary or PNG)
@@ -97,7 +99,8 @@ type EncodeConfig struct {
 // DecodeConfig holds configuration parameters for the decoding operation.
 // This structure is created by the command-line interface and passed to DecodeDirectory.
 type DecodeConfig struct {
-	InputDir        string      // Path to the directory containing collections to decode
+	InputDir        string      // Path to the directory containing collections to decode (for backward compatibility)
+	InputDirs       []string    // List of input directories, each containing a collection to decode
 	OutputDir       string      // Path where the decoded data will be written
 	RNG             pad.RNG     // Random number generator (unused for decoding, but maintained for consistency)
 	Verbose         bool        // Enable verbose logging
@@ -130,7 +133,16 @@ type DecodeConfig struct {
 func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
 	start := time.Now()
-	log.Infof("Starting encode: InputDir=%s OutputDir=%s", cfg.InputDir, cfg.OutputDir)
+	
+	// Log differently depending on whether using single or multiple output directories
+	if len(cfg.OutputDirs) <= 1 {
+		log.Infof("Starting encode: InputDir=%s OutputDir=%s", cfg.InputDir, cfg.OutputDir)
+	} else {
+		log.Infof("Starting encode: InputDir=%s with %d output directories", cfg.InputDir, len(cfg.OutputDirs))
+		for i, dir := range cfg.OutputDirs {
+			log.Debugf("  OutputDir[%d]=%s", i, dir)
+		}
+	}
 	log.Debugf("Encode parameters: copies=%d, required=%d, Format=%s, ChunkSize=%d", cfg.N, cfg.K, cfg.Format, cfg.ChunkSize)
 
 	// Validate input directory to ensure it exists and is accessible
@@ -138,9 +150,19 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		return err
 	}
 
-	// Prepare the output directory, clearing it if requested and it's not empty
-	if err := file.PrepareOutputDirectory(ctx, cfg.OutputDir, cfg.ClearIfNotEmpty); err != nil {
-		return err
+	// Prepare all output directories, clearing them if requested and they're not empty
+	if len(cfg.OutputDirs) > 1 {
+		// When using multiple output directories - prepare each one individually
+		for _, dir := range cfg.OutputDirs {
+			if err := file.PrepareOutputDirectory(ctx, dir, cfg.ClearIfNotEmpty); err != nil {
+				return err
+			}
+		}
+	} else {
+		// Traditional single output directory approach
+		if err := file.PrepareOutputDirectory(ctx, cfg.OutputDir, cfg.ClearIfNotEmpty); err != nil {
+			return err
+		}
 	}
 
 	// Create a new pad instance with the specified N and K parameters
@@ -152,11 +174,39 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		return err
 	}
 
-	// Create collection directories where encoded chunks will be stored
-	// Collections are named according to the K-of-N scheme (e.g., "3A5", "3B5", etc.)
-	collections, err := file.CreateCollections(ctx, cfg.OutputDir, p.Collections)
-	if err != nil {
-		return err
+	// Create collections based on the configuration
+	var collections []file.Collection
+	if len(cfg.OutputDirs) > 1 {
+		// Use multiple output directories - one collection per directory
+		if len(cfg.OutputDirs) != len(p.Collections) {
+			return fmt.Errorf("number of output directories (%d) does not match number of collections (%d)",
+				len(cfg.OutputDirs), len(p.Collections))
+		}
+		
+		// Create collections in individual directories
+		collections = make([]file.Collection, len(p.Collections))
+		for i, collName := range p.Collections {
+			// For multiple output dirs, we use the actual directory as the collection directory
+			// (not a subdirectory like in the traditional approach)
+			collections[i] = file.Collection{
+				Name: collName,
+				Path: cfg.OutputDirs[i],
+				Format: cfg.Format,
+			}
+			log.Debugf("Created collection %d: %s at %s", i+1, collName, cfg.OutputDirs[i])
+		}
+	} else {
+		// Traditional approach - create collection subdirectories in single output directory
+		var err error
+		collections, err = file.CreateCollections(ctx, cfg.OutputDir, p.Collections)
+		if err != nil {
+			return err
+		}
+		
+		// Set format for all collections
+		for i := range collections {
+			collections[i].Format = cfg.Format
+		}
 	}
 
 	// Get the formatter for the specified format (binary or PNG)
@@ -197,8 +247,14 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 			return nil, fmt.Errorf("collection not found: %s", collectionName)
 		}
 
-		// Create a writer that writes to the collection using the specified formatter
-		return file.NewChunkWriter(ctx, formatter, collPath, 0, chunkNumber), nil
+		// Create a NamedChunkWriter that ensures the collection name (not dir name) is used in filenames
+		return &file.NamedChunkWriter{
+			Ctx:       ctx,
+			Formatter: formatter,
+			CollPath:  collPath,
+			CollName:  collectionName,
+			ChunkNum:  chunkNumber,
+		}, nil
 	}
 
 	// Run the actual encoding process, which:
@@ -223,15 +279,95 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	// Create ZIP archives for each collection if requested
 	// This makes it easier to distribute collections to different locations
 	if cfg.ZipCollections {
-		if _, err := file.ZipCollections(ctx, collections); err != nil {
-			return err
+		if len(cfg.OutputDirs) > 1 {
+			// For multiple output directories, create zip files within each directory
+			// but don't delete the directories (just zip the contents)
+			for _, coll := range collections {
+				zipPath, err := file.ZipDirectoryContents(ctx, coll.Path, coll.Name)
+				if err != nil {
+					log.Error(fmt.Errorf("failed to create zip for collection %s: %w", coll.Name, err))
+					return err
+				}
+				log.Infof("Created zip archive for collection %s: %s", coll.Name, zipPath)
+			}
+		} else {
+			// Traditional approach - delete the directories after zipping
+			if _, err := file.ZipCollections(ctx, collections); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Log completion information including elapsed time
 	elapsed := time.Since(start)
-	log.Infof("Encode complete (%s) -copies %d -required %d -format %s", elapsed, cfg.N, cfg.K, cfg.Format)
+	
+	// Log differently depending on whether using single or multiple output directories
+	if len(cfg.OutputDirs) <= 1 {
+		log.Infof("Encode complete (%s) -copies %d -required %d -format %s", elapsed, cfg.N, cfg.K, cfg.Format)
+	} else {
+		log.Infof("Encode complete (%s) with %d output directories -required %d -format %s", 
+			elapsed, len(cfg.OutputDirs), cfg.K, cfg.Format)
+	}
+	
 	return nil
+}
+
+// isValidCollectionDir checks if a directory is likely to contain a valid collection
+func isValidCollectionDir(ctx context.Context, dirPath string) bool {
+	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
+	log.Debugf("Checking if %s is a valid collection directory", dirPath)
+	
+	// Try to determine collection format
+	format, err := file.DetermineCollectionFormat(dirPath)
+	if err != nil {
+		log.Debugf("%s is not a valid collection directory: %v", dirPath, err)
+		return false
+	}
+	
+	log.Debugf("%s appears to be a valid collection directory with format %s", dirPath, format)
+	return true
+}
+
+// determineCollectionNameFromContent tries to deduce the collection name by examining files
+func determineCollectionNameFromContent(ctx context.Context, dirPath string) (string, error) {
+	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
+	
+	// Read the directory
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read directory: %w", err)
+	}
+	
+	// Look for files with pattern like "IMG3A5_0001.PNG" or "3A5_0001.bin"
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		
+		name := entry.Name()
+		
+		// Check for PNG files
+		if strings.HasSuffix(strings.ToUpper(name), ".PNG") && strings.HasPrefix(name, "IMG") {
+			// Extract the collection name after "IMG" and before "_"
+			parts := strings.Split(strings.TrimPrefix(name, "IMG"), "_")
+			if len(parts) > 0 && file.IsCollectionName(parts[0]) {
+				log.Debugf("Determined collection name '%s' from file %s", parts[0], name)
+				return parts[0], nil
+			}
+		}
+		
+		// Check for bin files
+		if strings.HasSuffix(name, ".bin") {
+			// Extract the collection name before "_"
+			parts := strings.Split(name, "_")
+			if len(parts) > 0 && file.IsCollectionName(parts[0]) {
+				log.Debugf("Determined collection name '%s' from file %s", parts[0], name)
+				return parts[0], nil
+			}
+		}
+	}
+	
+	return "", fmt.Errorf("could not determine collection name from directory content")
 }
 
 // DecodeDirectory reconstructs original data from K or more collections using the padlock scheme.
@@ -259,11 +395,15 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
 	start := time.Now()
-	log.Infof("Starting decode: InputDir=%s OutputDir=%s", cfg.InputDir, cfg.OutputDir)
-
-	// Validate input directory to ensure it exists and is accessible
-	if err := file.ValidateInputDirectory(ctx, cfg.InputDir); err != nil {
-		return err
+	
+	// Log differently depending on whether using single or multiple input directories
+	if len(cfg.InputDirs) <= 1 {
+		log.Infof("Starting decode: InputDir=%s OutputDir=%s", cfg.InputDir, cfg.OutputDir)
+	} else {
+		log.Infof("Starting decode with %d input directories, OutputDir=%s", len(cfg.InputDirs), cfg.OutputDir)
+		for i, dir := range cfg.InputDirs {
+			log.Debugf("  InputDir[%d]=%s", i, dir)
+		}
 	}
 
 	// Prepare the output directory, clearing it if requested and it's not empty
@@ -271,34 +411,111 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		return err
 	}
 
-	// Find collections (directories or zips) in the input directory
-	// This identifies all available collections, extracting ZIP files if necessary
-	collections, tempDir, err := file.FindCollections(ctx, cfg.InputDir)
-	if err != nil {
-		return err
+	// Variable to hold all collected collections and a tempDir if needed
+	var allCollections []file.Collection
+	var collTempDir string
+	
+	// Handle single input dir or multiple input dirs
+	if len(cfg.InputDirs) <= 1 {
+		// Traditional approach - single input directory containing multiple collections
+		// Validate input directory to ensure it exists and is accessible
+		if err := file.ValidateInputDirectory(ctx, cfg.InputDir); err != nil {
+			return err
+		}
+		
+		// Find collections (directories or zips) in the input directory
+		// This identifies all available collections, extracting ZIP files if necessary
+		collections, tempDir, err := file.FindCollections(ctx, cfg.InputDir)
+		if err != nil {
+			return err
+		}
+		
+		// Use the results
+		allCollections = collections
+		collTempDir = tempDir
+	} else {
+		// Multiple input directory mode - each input directory is treated as a collection
+		for _, inputDir := range cfg.InputDirs {
+			// Validate each input directory
+			if err := file.ValidateInputDirectory(ctx, inputDir); err != nil {
+				return err
+			}
+			
+			// First check if this directory contains a collection directly
+			// (it might be a directory containing a collection like '3A5')
+			if isValidCollectionDir(ctx, inputDir) {
+				// The directory itself is a valid collection
+				format, err := file.DetermineCollectionFormat(inputDir)
+				if err != nil {
+					log.Infof("Could not determine collection format for %s, skipping: %v", inputDir, err)
+					continue
+				}
+				
+				collName := filepath.Base(inputDir)
+				if !file.IsCollectionName(collName) {
+					// If the directory name is not a valid collection name,
+					// try to find a valid collection inside by examining files
+					collName, err = determineCollectionNameFromContent(ctx, inputDir)
+					if err != nil {
+						log.Infof("Could not determine collection name for %s, skipping: %v", inputDir, err)
+						continue
+					}
+				}
+				
+				collection := file.Collection{
+					Name:   collName,
+					Path:   inputDir,
+					Format: format,
+				}
+				allCollections = append(allCollections, collection)
+				log.Debugf("Found direct collection in %s, name=%s, format=%s", inputDir, collName, format)
+			} else {
+				// Check if the directory contains collections or zip files
+				collections, tempDir, err := file.FindCollections(ctx, inputDir)
+				if err != nil {
+					log.Infof("Failed to find collections in %s: %v", inputDir, err)
+					continue
+				}
+				
+				// Add these collections to our master list
+				allCollections = append(allCollections, collections...)
+				
+				// Remember the tempDir for cleanup if it exists
+				if tempDir != "" && collTempDir == "" {
+					collTempDir = tempDir
+				}
+				
+				log.Debugf("Found %d collections in directory %s", len(collections), inputDir)
+			}
+		}
 	}
 
 	// If we extracted zip files, clean up the temporary directory when done
-	if tempDir != "" {
+	if collTempDir != "" {
 		defer func() {
-			log.Debugf("Cleaning up temporary directory: %s", tempDir)
-			os.RemoveAll(tempDir)
+			log.Debugf("Cleaning up temporary directory: %s", collTempDir)
+			os.RemoveAll(collTempDir)
 		}()
 	}
 
 	// Ensure we found at least some collections
-	if len(collections) == 0 {
-		log.Error(fmt.Errorf("no collections found in input directory"))
-		return fmt.Errorf("no collections found in input directory")
+	if len(allCollections) == 0 {
+		if len(cfg.InputDirs) <= 1 {
+			log.Error(fmt.Errorf("no collections found in input directory"))
+			return fmt.Errorf("no collections found in input directory")
+		} else {
+			log.Error(fmt.Errorf("no valid collections found in any of the input directories"))
+			return fmt.Errorf("no valid collections found in any of the input directories")
+		}
 	}
-	log.Debugf("Found %d collections", len(collections))
+	log.Debugf("Found total of %d collections", len(allCollections))
 
 	// Create collection readers for each collection
 	// These readers handle the format-specific details of reading chunks
-	readers := make([]io.Reader, len(collections))
-	collReaders := make([]*file.CollectionReader, len(collections))
+	readers := make([]io.Reader, len(allCollections))
+	collReaders := make([]*file.CollectionReader, len(allCollections))
 
-	for i, coll := range collections {
+	for i, coll := range allCollections {
 		collReader := file.NewCollectionReader(coll)
 		collReaders[i] = collReader
 
@@ -308,7 +525,7 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	}
 
 	// Get the number of available collections (important for pad initialization)
-	n := len(collections)
+	n := len(allCollections)
 	log.Infof("Collections: %d", n)
 
 	// Create a pipe for transferring decoded data between goroutines
@@ -372,8 +589,8 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	log.Debugf("Starting decode process")
 
 	// Create collection names list for logging purposes
-	collectionNames := make([]string, len(collections))
-	for i, coll := range collections {
+	collectionNames := make([]string, len(allCollections))
+	for i, coll := range allCollections {
 		collectionNames[i] = coll.Name
 	}
 

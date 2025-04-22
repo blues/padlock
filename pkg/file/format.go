@@ -36,6 +36,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/blues/padlock/pkg/trace"
 )
@@ -152,26 +153,81 @@ func (bf *BinFormatter) WriteChunk(ctx context.Context, collectionPath string, c
 func (bf *BinFormatter) ReadChunk(ctx context.Context, collectionPath string, collectionIndex int, chunkNumber int) ([]byte, error) {
 	log := trace.FromContext(ctx).WithPrefix("BIN-FORMATTER")
 
-	base := filepath.Base(collectionPath)
-	fname := fmt.Sprintf("%s_%04d.bin", base, chunkNumber)
-	fp := filepath.Join(collectionPath, fname)
-
-	log.Debugf("Reading chunk %d from binary file: %s", chunkNumber, fp)
-
-	// Check if the file exists
-	if _, err := os.Stat(fp); os.IsNotExist(err) {
-		log.Debugf("Chunk file does not exist: %s", fp)
-		// Return a more informative error message
-		return nil, fmt.Errorf("chunk file does not exist: %s", fp)
+	// Try different naming patterns for the chunk file
+	// First try collection name based approach (like "3A5_0001.bin")
+	// Then try directory basename approach (like "in1_0001.bin")
+	// Then try just finding any file with the chunk number
+	
+	patterns := []string{
+		// Try to match by chunk number using different patterns
+		fmt.Sprintf("*_%04d.bin", chunkNumber),
 	}
 
-	data, err := os.ReadFile(fp)
+	// Scan the directory for matching files
+	var foundPath string
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(collectionPath, pattern))
+		if err != nil {
+			log.Debugf("Error searching for pattern %s: %v", pattern, err)
+			continue
+		}
+		
+		if len(matches) > 0 {
+			foundPath = matches[0]
+			log.Debugf("Found matching chunk file: %s", foundPath)
+			break
+		}
+	}
+	
+	// If no file found through patterns, try scanning directory for chunk number
+	if foundPath == "" {
+		entries, err := os.ReadDir(collectionPath)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to read directory: %w", err))
+			return nil, fmt.Errorf("failed to read directory: %w", err)
+		}
+		
+		chunkNumStr := fmt.Sprintf("_%04d.bin", chunkNumber)
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), chunkNumStr) {
+				foundPath = filepath.Join(collectionPath, entry.Name())
+				log.Debugf("Found chunk file by suffix: %s", foundPath)
+				break
+			}
+		}
+	}
+
+	// Still no file found, try a last resort of just getting any .bin file
+	if foundPath == "" && chunkNumber == 1 {
+		entries, err := os.ReadDir(collectionPath)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to read directory: %w", err))
+			return nil, fmt.Errorf("failed to read directory: %w", err)
+		}
+		
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".bin") {
+				foundPath = filepath.Join(collectionPath, entry.Name())
+				log.Debugf("Found bin file as last resort: %s", foundPath)
+				break
+			}
+		}
+	}
+
+	// If still no file found, return an error
+	if foundPath == "" {
+		log.Debugf("No chunk file found for chunk %d in %s", chunkNumber, collectionPath)
+		return nil, fmt.Errorf("chunk file not found for chunk %d", chunkNumber)
+	}
+
+	// Read the file
+	data, err := os.ReadFile(foundPath)
 	if err != nil {
-		log.Error(fmt.Errorf("failed to read chunk file: %w", err))
+		log.Error(fmt.Errorf("failed to read chunk file %s: %w", foundPath, err))
 		return nil, fmt.Errorf("failed to read chunk file: %w", err)
 	}
 
-	log.Debugf("Successfully read %d bytes from chunk file", len(data))
+	log.Debugf("Successfully read %d bytes from chunk file %s", len(data), foundPath)
 	return data, nil
 }
 
@@ -238,33 +294,102 @@ func (pf *PngFormatter) WriteChunk(ctx context.Context, collectionPath string, c
 func (pf *PngFormatter) ReadChunk(ctx context.Context, collectionPath string, collectionIndex int, chunkNumber int) ([]byte, error) {
 	log := trace.FromContext(ctx).WithPrefix("PNG-FORMATTER")
 
-	base := filepath.Base(collectionPath)
-	fname := fmt.Sprintf("IMG%s_%04d.PNG", base, chunkNumber)
-	fp := filepath.Join(collectionPath, fname)
-
-	log.Debugf("Reading chunk %d from PNG file: %s", chunkNumber, fp)
-
-	// Check if the file exists
-	if _, err := os.Stat(fp); os.IsNotExist(err) {
-		log.Debugf("Chunk file does not exist: %s", fp)
-		// Return a more informative error message
-		return nil, fmt.Errorf("chunk file does not exist: %s", fp)
+	// Try different naming patterns for the chunk file
+	// First try collection name based approach (like "IMG3A5_0001.PNG")
+	// Then try directory basename approach (like "IMGin1_0001.PNG")
+	// Then try just finding any file with the chunk number
+	
+	patterns := []string{
+		// Try to match by chunk number using different patterns
+		fmt.Sprintf("*_%04d.PNG", chunkNumber),
+		fmt.Sprintf("*_%04d.png", chunkNumber),
 	}
 
-	f, err := os.Open(fp)
+	// Scan the directory for matching files
+	var foundPath string
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(collectionPath, pattern))
+		if err != nil {
+			log.Debugf("Error searching for pattern %s: %v", pattern, err)
+			continue
+		}
+		
+		if len(matches) > 0 {
+			foundPath = matches[0]
+			log.Debugf("Found matching chunk file: %s", foundPath)
+			break
+		}
+	}
+	
+	// If no file found through patterns, try scanning directory for chunk number
+	if foundPath == "" {
+		entries, err := os.ReadDir(collectionPath)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to read directory: %w", err))
+			return nil, fmt.Errorf("failed to read directory: %w", err)
+		}
+		
+		// Try both uppercase and lowercase PNG extensions
+		chunkNumStrUpper := fmt.Sprintf("_%04d.PNG", chunkNumber)
+		chunkNumStrLower := fmt.Sprintf("_%04d.png", chunkNumber)
+		
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			
+			name := entry.Name()
+			if strings.HasSuffix(name, chunkNumStrUpper) || strings.HasSuffix(name, chunkNumStrLower) {
+				foundPath = filepath.Join(collectionPath, name)
+				log.Debugf("Found chunk file by suffix: %s", foundPath)
+				break
+			}
+		}
+	}
+
+	// Still no file found, try a last resort of just getting any PNG file
+	if foundPath == "" && chunkNumber == 1 {
+		entries, err := os.ReadDir(collectionPath)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to read directory: %w", err))
+			return nil, fmt.Errorf("failed to read directory: %w", err)
+		}
+		
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			
+			name := strings.ToUpper(entry.Name())
+			if strings.HasSuffix(name, ".PNG") {
+				foundPath = filepath.Join(collectionPath, entry.Name())
+				log.Debugf("Found PNG file as last resort: %s", foundPath)
+				break
+			}
+		}
+	}
+
+	// If still no file found, return an error
+	if foundPath == "" {
+		log.Debugf("No chunk file found for chunk %d in %s", chunkNumber, collectionPath)
+		return nil, fmt.Errorf("chunk file not found for chunk %d", chunkNumber)
+	}
+
+	// Read the file
+	f, err := os.Open(foundPath)
 	if err != nil {
-		log.Error(fmt.Errorf("failed to open PNG file: %w", err))
+		log.Error(fmt.Errorf("failed to open PNG file %s: %w", foundPath, err))
 		return nil, fmt.Errorf("failed to open PNG file: %w", err)
 	}
 	defer f.Close()
 
 	data, err := ExtractDataFromPNG(f)
 	if err != nil {
-		log.Error(fmt.Errorf("failed to extract data from PNG: %w", err))
+		log.Error(fmt.Errorf("failed to extract data from PNG %s: %w", foundPath, err))
 		return nil, fmt.Errorf("failed to extract data from PNG: %w", err)
 	}
 
-	log.Debugf("Successfully read %d bytes from PNG file", len(data))
+	log.Debugf("Successfully read %d bytes from PNG file %s", len(data), foundPath)
 	return data, nil
 }
 
@@ -278,6 +403,80 @@ func GetFormatter(format Format) Formatter {
 	default:
 		return &BinFormatter{} // Default to binary format
 	}
+}
+
+// WriteNamedChunk is a helper function that writes a chunk using the collection name
+// rather than the basename of the directory path
+func WriteNamedChunk(ctx context.Context, formatter Formatter, dirPath string, collName string, chunkNumber int, data []byte) error {
+	log := trace.FromContext(ctx).WithPrefix("NAMED-CHUNK")
+	
+	var fname string
+	
+	// Generate the filename based on formatter type and collection name (not path)
+	switch formatter.(type) {
+	case *BinFormatter:
+		fname = fmt.Sprintf("%s_%04d.bin", collName, chunkNumber)
+	case *PngFormatter:
+		fname = fmt.Sprintf("IMG%s_%04d.PNG", collName, chunkNumber)
+	default:
+		return fmt.Errorf("unsupported formatter type")
+	}
+	
+	fp := filepath.Join(dirPath, fname)
+	log.Debugf("Writing named chunk %d to file: %s", chunkNumber, fp)
+	
+	if err := os.MkdirAll(filepath.Dir(fp), 0755); err != nil {
+		log.Error(fmt.Errorf("failed to create chunk directory: %w", err))
+		return fmt.Errorf("failed to create chunk directory: %w", err)
+	}
+	
+	// Use the appropriate method to write the chunk data
+	switch formatter.(type) {
+	case *BinFormatter:
+		// Write data directly to the file
+		file, err := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to open chunk file: %w", err))
+			return fmt.Errorf("failed to open chunk file: %w", err)
+		}
+		defer file.Close()
+		
+		if _, werr := file.Write(data); werr != nil {
+			log.Error(fmt.Errorf("failed to write chunk data: %w", werr))
+			return fmt.Errorf("failed to write chunk data: %w", werr)
+		}
+		
+		if err := file.Sync(); err != nil {
+			log.Error(fmt.Errorf("failed to sync chunk file: %w", err))
+			return fmt.Errorf("failed to sync chunk file: %w", err)
+		}
+		
+	case *PngFormatter:
+		// Create a PNG file with the data
+		file, err := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to open PNG file %s: %w", fp, err))
+			return fmt.Errorf("failed to open PNG file %s: %w", fp, err)
+		}
+		defer file.Close()
+		
+		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+		img.Set(0, 0, color.Transparent)
+		if err := encodePNGWithData(file, img, data); err != nil {
+			file.Close()
+			os.Remove(fp)
+			log.Error(fmt.Errorf("failed to encode PNG with data for %s: %w", fp, err))
+			return fmt.Errorf("failed to encode PNG with data for %s: %w", fp, err)
+		}
+		
+		if err := file.Sync(); err != nil {
+			log.Error(fmt.Errorf("failed to sync PNG file: %w", err))
+			return fmt.Errorf("failed to sync PNG file: %w", err)
+		}
+	}
+	
+	log.Debugf("Successfully wrote %d bytes to chunk file", len(data))
+	return nil
 }
 
 // encodePNGWithData injects data into a custom 'rAWd' chunk in a PNG image.

@@ -106,12 +106,12 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 		if entry.IsDir() {
 			collName := entry.Name()
 			// Check if this looks like a collection directory (e.g. "3A5")
-			if len(collName) >= 3 && isCollectionName(collName) {
+			if len(collName) >= 3 && IsCollectionName(collName) {
 				collPath := filepath.Join(inputDir, collName)
 				log.Debugf("Found collection directory: %s", collPath)
 
 				// Determine the format by looking at the files
-				format, err := determineCollectionFormat(collPath)
+				format, err := DetermineCollectionFormat(collPath)
 				if err != nil {
 					log.Error(fmt.Errorf("failed to determine format for collection %s: %w", collName, err))
 					continue
@@ -144,13 +144,13 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 				}
 
 				collName := filepath.Base(extractedDir)
-				if !isCollectionName(collName) {
+				if !IsCollectionName(collName) {
 					log.Error(fmt.Errorf("invalid collection name in zip file: %s", collName))
 					continue
 				}
 
 				// Determine the format by looking at the files
-				format, err := determineCollectionFormat(extractedDir)
+				format, err := DetermineCollectionFormat(extractedDir)
 				if err != nil {
 					log.Error(fmt.Errorf("failed to determine format for extracted collection %s: %w", collName, err))
 					continue
@@ -211,8 +211,9 @@ func ZipCollections(ctx context.Context, collections []Collection) ([]string, er
 	return zipPaths, nil
 }
 
-// determineCollectionFormat determines the format of a collection by looking at its files
-func determineCollectionFormat(collPath string) (Format, error) {
+// DetermineCollectionFormat determines the format of a collection by looking at its files
+// Exported so it can be used by other packages
+func DetermineCollectionFormat(collPath string) (Format, error) {
 	files, err := os.ReadDir(collPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read collection directory: %w", err)
@@ -232,8 +233,9 @@ func determineCollectionFormat(collPath string) (Format, error) {
 	return "", fmt.Errorf("unable to determine format for collection")
 }
 
-// isCollectionName checks if a string looks like a collection name (e.g. "3A5")
-func isCollectionName(name string) bool {
+// IsCollectionName checks if a string looks like a collection name (e.g. "3A5")
+// Exported so it can be used by other packages
+func IsCollectionName(name string) bool {
 	if len(name) < 3 {
 		return false
 	}
@@ -260,9 +262,10 @@ func isCollectionName(name string) bool {
 
 // CollectionReader reads data from a collection
 type CollectionReader struct {
-	Collection Collection
-	ChunkIndex int
-	Formatter  Formatter
+	Collection      Collection
+	ChunkIndex      int
+	Formatter       Formatter
+	sortedChunkFiles []string // Cached list of sorted chunk files in directory
 }
 
 // NewCollectionReader creates a new collection reader
@@ -277,42 +280,95 @@ func NewCollectionReader(collection Collection) *CollectionReader {
 // ReadNextChunk reads the next chunk from the collection
 func (cr *CollectionReader) ReadNextChunk(ctx context.Context) ([]byte, error) {
 	log := trace.FromContext(ctx).WithPrefix("COLLECTION-READER")
-
-	log.Debugf("Reading chunk %d from collection %s", cr.ChunkIndex, cr.Collection.Name)
-
-	// Check if we're looking for a chunk that exists before trying to read it
-	var filePath string
-	if cr.Collection.Format == FormatPNG {
-		filePath = filepath.Join(cr.Collection.Path, fmt.Sprintf("IMG%s_%04d.PNG", cr.Collection.Name, cr.ChunkIndex))
-	} else {
-		filePath = filepath.Join(cr.Collection.Path, fmt.Sprintf("%s_%04d.bin", cr.Collection.Name, cr.ChunkIndex))
-	}
-
-	// Extra debug tracing
-	log.Debugf("Looking for chunk file: %s", filePath)
-
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		log.Debugf("Chunk file does not exist: %s", filePath)
-		log.Debugf("No more chunks in collection %s after chunk %d", cr.Collection.Name, cr.ChunkIndex-1)
-		return nil, io.EOF
-	}
-
-	// Read the current chunk
-	currentChunkIndex := cr.ChunkIndex
-	data, err := cr.Formatter.ReadChunk(ctx, cr.Collection.Path, 0, currentChunkIndex)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			log.Debugf("No more chunks in collection %s", cr.Collection.Name)
+	
+	// Lazy initialization of sorted chunk files list
+	if cr.sortedChunkFiles == nil {
+		log.Debugf("Initializing sorted chunk files for collection in %s", cr.Collection.Path)
+		
+		// Read all files in the directory
+		entries, err := os.ReadDir(cr.Collection.Path)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to read collection directory: %w", err))
+			return nil, fmt.Errorf("failed to read collection directory: %w", err)
+		}
+		
+		// Filter for chunk files based on extension
+		var chunkFiles []string
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			
+			name := entry.Name()
+			ext := strings.ToUpper(filepath.Ext(name))
+			
+			// Check if it's a valid chunk file based on extension
+			if (cr.Collection.Format == FormatPNG && (ext == ".PNG" || ext == ".png")) ||
+			   (cr.Collection.Format == FormatBin && ext == ".bin") ||
+			   (cr.Collection.Format == "" && (ext == ".PNG" || ext == ".png" || ext == ".bin")) {
+				chunkFiles = append(chunkFiles, name)
+			}
+		}
+		
+		// If no chunk files found, return EOF
+		if len(chunkFiles) == 0 {
+			log.Debugf("No chunk files found in collection directory: %s", cr.Collection.Path)
 			return nil, io.EOF
 		}
-		log.Error(fmt.Errorf("failed to read chunk %d from collection %s: %w", currentChunkIndex, cr.Collection.Name, err))
-		return nil, err
+		
+		// Sort the chunk files alphabetically
+		sort.Strings(chunkFiles)
+		
+		// Store the sorted chunk files
+		cr.sortedChunkFiles = chunkFiles
+		log.Debugf("Found and sorted %d chunk files", len(chunkFiles))
 	}
-
-	log.Debugf("Successfully read chunk %d (%d bytes) from collection %s", currentChunkIndex, len(data), cr.Collection.Name)
-
+	
+	// Check if we've reached the end of the chunk files
+	if cr.ChunkIndex > len(cr.sortedChunkFiles) {
+		log.Debugf("No more chunks in collection (reached end of sorted files)")
+		return nil, io.EOF
+	}
+	
+	// Get the current chunk file
+	chunkFile := cr.sortedChunkFiles[cr.ChunkIndex-1]
+	filePath := filepath.Join(cr.Collection.Path, chunkFile)
+	
+	log.Debugf("Reading chunk %d (file: %s) from collection %s", cr.ChunkIndex, chunkFile, cr.Collection.Name)
+	
+	// Read the chunk data
+	var data []byte
+	var err error
+	
+	// Use the appropriate method to read the data based on file extension
+	ext := strings.ToUpper(filepath.Ext(chunkFile))
+	if ext == ".PNG" || ext == ".png" {
+		// Use PNG format to read the file
+		f, err := os.Open(filePath)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to open PNG file: %w", err))
+			return nil, fmt.Errorf("failed to open chunk file: %w", err)
+		}
+		defer f.Close()
+		
+		data, err = ExtractDataFromPNG(f)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to extract data from PNG: %w", err))
+			return nil, fmt.Errorf("failed to extract data from PNG: %w", err)
+		}
+	} else {
+		// Default to binary format
+		data, err = os.ReadFile(filePath)
+		if err != nil {
+			log.Error(fmt.Errorf("failed to read chunk file: %w", err))
+			return nil, fmt.Errorf("failed to read chunk file: %w", err)
+		}
+	}
+	
+	log.Debugf("Successfully read %d bytes from chunk file %s", len(data), chunkFile)
+	
 	// Increment the chunk index for the next read
 	cr.ChunkIndex++
-
+	
 	return data, nil
 }

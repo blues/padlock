@@ -182,3 +182,107 @@ func CleanupCollectionDirectory(ctx context.Context, collPath string) error {
 	log.Debugf("Successfully removed original collection directory")
 	return nil
 }
+
+// ZipDirectoryContents creates a ZIP archive of contents in a directory without removing the directory,
+// but removes all the original files after creating the zip
+func ZipDirectoryContents(ctx context.Context, dirPath string, collName string) (string, error) {
+	log := trace.FromContext(ctx).WithPrefix("ZIP")
+
+	zipPath := filepath.Join(dirPath, collName+".zip")
+	log.Debugf("Creating zip archive for collection %s: %s", collName, zipPath)
+
+	// Create zip file
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		log.Error(fmt.Errorf("failed to create zip file %s: %w", zipPath, err))
+		return "", fmt.Errorf("failed to create zip file %s: %w", zipPath, err)
+	}
+
+	zw := zip.NewWriter(zipFile)
+	
+	// Keep track of all files we add to the zip (to delete later)
+	var filesToDelete []string
+
+	// Walk through directory and add files to zip
+	err = filepath.Walk(dirPath, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and the zip file itself
+		if info.IsDir() || path == zipPath {
+			return nil
+		}
+
+		// Add to list of files to delete after zipping
+		filesToDelete = append(filesToDelete, path)
+
+		// Create a relative path for the zip entry
+		rel, err := filepath.Rel(dirPath, path)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path: %w", err)
+		}
+
+		log.Debugf("Adding file to zip: %s", rel)
+
+		// Create a zip file header
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return fmt.Errorf("failed to create zip header: %w", err)
+		}
+		header.Name = rel
+		header.Method = zip.Deflate
+
+		// Create the file in the zip
+		writer, err := zw.CreateHeader(header)
+		if err != nil {
+			return fmt.Errorf("failed to create zip entry: %w", err)
+		}
+
+		// Open the file to read its content
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open file %s: %w", path, err)
+		}
+		defer file.Close()
+
+		// Copy the file content to the zip entry
+		_, err = io.Copy(writer, file)
+		if err != nil {
+			return fmt.Errorf("failed to write file to zip: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		zw.Close()
+		zipFile.Close()
+		log.Error(fmt.Errorf("error creating zip for collection %s: %w", collName, err))
+		return "", fmt.Errorf("error creating zip for collection %s: %w", collName, err)
+	}
+
+	// Close the zip writer and file
+	if err := zw.Close(); err != nil {
+		zipFile.Close()
+		log.Error(fmt.Errorf("failed to close zip writer: %w", err))
+		return "", fmt.Errorf("failed to close zip writer: %w", err)
+	}
+	if err := zipFile.Close(); err != nil {
+		log.Error(fmt.Errorf("failed to close zip file: %w", err))
+		return "", fmt.Errorf("failed to close zip file: %w", err)
+	}
+
+	// After successful zip creation, delete all the original files
+	for _, filePath := range filesToDelete {
+		if err := os.Remove(filePath); err != nil {
+			log.Debugf("Warning: Failed to delete file after zipping: %s (%v)", filePath, err)
+			// Continue even if deletion fails - the zip file is still valid
+		} else {
+			log.Debugf("Deleted original file after zipping: %s", filePath)
+		}
+	}
+
+	log.Debugf("Successfully created zip archive: %s", zipPath)
+	return zipPath, nil
+}

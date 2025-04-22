@@ -22,6 +22,17 @@ type ChunkWriter struct {
 	chunkData []byte
 }
 
+// NamedChunkWriter is like ChunkWriter but allows specifying a collection name
+// that is different from the directory basename
+type NamedChunkWriter struct {
+	Ctx       context.Context
+	Formatter Formatter
+	CollPath  string
+	CollName  string  // Use this name for the files instead of basename
+	ChunkNum  int
+	chunkData []byte
+}
+
 // NewChunkWriter creates a new ChunkWriter for a specific collection and chunk
 func NewChunkWriter(ctx context.Context, formatter Formatter, collPath string, collIndex int, chunkNum int) *ChunkWriter {
 	return &ChunkWriter{
@@ -129,6 +140,106 @@ func (cw *ChunkWriter) Close() error {
 	}
 
 	return cw.formatter.WriteChunk(cw.ctx, cw.collPath, cw.collIndex, cw.chunkNum, cw.chunkData)
+}
+
+// Write implements io.Writer interface for NamedChunkWriter
+func (cw *NamedChunkWriter) Write(p []byte) (n int, err error) {
+	if cw.chunkData == nil {
+		cw.chunkData = make([]byte, 0)
+	}
+	cw.chunkData = append(cw.chunkData, p...)
+	return len(p), nil
+}
+
+// validateRandomness performs basic statistical tests on data to ensure it appears random for NamedChunkWriter
+func (cw *NamedChunkWriter) validateRandomness() error {
+	log := trace.FromContext(cw.Ctx).WithPrefix("RANDOMNESS-CHECK")
+
+	// Skip validation for very small chunks (less than 32 bytes)
+	if len(cw.chunkData) < 32 {
+		log.Debugf("Skipping randomness check for small chunk (%d bytes)", len(cw.chunkData))
+		return nil
+	}
+
+	// Calculate byte frequency distribution
+	counts := make([]int, 256)
+	for _, b := range cw.chunkData {
+		counts[b]++
+	}
+
+	// Check for byte distribution anomalies
+	// We expect a relatively uniform distribution in random data
+	zeroCount := 0
+	highByteCount := 0
+	zeros := counts[0]
+
+	// Count extreme values
+	for _, count := range counts {
+		if count == 0 {
+			zeroCount++
+		}
+		if count > len(cw.chunkData)/10 { // More than 10% of data is a single byte value
+			highByteCount++
+		}
+	}
+
+	// Detection parameters - tweaked for reasonable sensitivity without false positives
+	// 1. Too many byte values never appear (suggests limited range of values)
+	if zeroCount > 128 {
+		log.Debugf("Warning: %d out of 256 possible byte values never appear in the data", zeroCount)
+
+		// Don't fail the write, but warn the user through logging
+		if zeroCount > 200 {
+			log.Infof("⚠️ Low entropy detected: Data has limited byte diversity. Only %d/256 possible byte values used.", 256-zeroCount)
+		}
+	}
+
+	// 2. Too many of a single byte value (suggests patterns or non-randomness)
+	if highByteCount > 5 {
+		log.Debugf("Warning: %d byte values appear with unusually high frequency", highByteCount)
+		log.Infof("⚠️ Possible non-random pattern detected in data. Some byte values appear with unusually high frequency.")
+	}
+
+	// 3. Too many zeros or ones (common in non-random data like all-zero blocks)
+	if zeros > len(cw.chunkData)/4 {
+		log.Infof("⚠️ Low randomness warning: %d%% of data consists of zero bytes.", 100*zeros/len(cw.chunkData))
+	}
+
+	// Calculate byte-level Shannon entropy (scaled 0-8 bits)
+	// This is a good overall measurement of randomness/unpredictability
+	entropy := 0.0
+	dataLen := float64(len(cw.chunkData))
+	for _, count := range counts {
+		if count > 0 {
+			p := float64(count) / dataLen
+			entropy -= p * math.Log2(p)
+		}
+	}
+
+	// Truly random data should have entropy close to 8 bits per byte
+	if entropy < 6.5 {
+		log.Infof("⚠️ Low entropy warning: Data entropy is %.2f bits per byte (high-quality random data should be close to 8.0)", entropy)
+		// While this is concerning, don't block the operation - just warn the user
+	} else {
+		log.Debugf("Data passed randomness check: entropy = %.2f bits per byte", entropy)
+	}
+
+	// Return nil to allow the operation to proceed regardless of warnings
+	// This allows valid writes with warnings, but we've alerted the user to potential issues
+	return nil
+}
+
+// Close implements io.Closer interface for NamedChunkWriter
+func (cw *NamedChunkWriter) Close() error {
+	// Validate randomness before writing
+	if err := cw.validateRandomness(); err != nil {
+		log := trace.FromContext(cw.Ctx).WithPrefix("NAMED-CHUNK-WRITER")
+		log.Error(fmt.Errorf("randomness validation failed: %w", err))
+		// Note: we continue even after validation errors to maintain compatibility
+	}
+
+	// Call the custom write function that uses Collection name instead of path basename
+	return WriteNamedChunk(cw.Ctx, cw.Formatter, cw.CollPath, cw.CollName, cw.ChunkNum, cw.chunkData)
 }
 
 // ChunkReaderAdapter adapts CollectionReader to io.Reader

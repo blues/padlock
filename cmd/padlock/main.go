@@ -54,6 +54,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/blues/padlock/pkg/pad"
@@ -69,7 +70,9 @@ import (
 func usage() {
 	fmt.Fprintf(os.Stderr, `Usage:
   padlock encode <inputDir> <outputDir> [-copies N] [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-unzip]
+  padlock encode <inputDir> <outputDir1> <outputDir2> ... <outputDirN> [-required REQUIRED] [-format bin|png] [-clear] [-chunk SIZE] [-verbose] [-unzip]
   padlock decode <inputDir> <outputDir> [-clear] [-verbose]
+  padlock decode <inputDir1> <inputDir2> ... <inputDirN> <outputDir> [-clear] [-verbose]
 
 Commands:
   encode            Split input data into N collections with K-of-N threshold security
@@ -78,19 +81,24 @@ Commands:
 Parameters:
   <inputDir>        Source directory containing data to encode or collections to decode
   <outputDir>       Destination directory for encoded collections or decoded data
+  <outputDir1>..N>  Individual destination directories for each collection (number of dirs = number of copies)
+  <inputDir1>..N>   For decode: collection directories to process (last argument is output directory)
 
 Options:
   -copies N         Number of collections to create (must be between 2 and 26, default: 2)
+                    Not needed if multiple output directories are provided (count is inferred)
   -required REQUIRED  Minimum collections required for reconstruction (default: 2)
   -format FORMAT    Output format: bin or png (default: png)
-  -clear            Clear output directory if not empty
+  -clear            Clear output directories if not empty
   -chunk SIZE       Maximum candidate block size in bytes (default: 2MB)
   -verbose          Enable detailed debug output
   -unzip            Create directories for each collection instead of zip files (default: creates zip files)
 
 Examples:
   padlock encode ~/Documents/secret ~/Collections -copies 5 -required 3 -format png
+  padlock encode ~/Documents/secret ~/Coll1 ~/Coll2 ~/Coll3 ~/Coll4 ~/Coll5 -required 3 -format png
   padlock decode ~/Collections/subset ~/Restored -clear
+  padlock decode ~/Coll1 ~/Coll2 ~/Coll3 ~/Restored -clear
   padlock encode ~/Documents/top-secret ~/Collections -copies 5 -required 3 -verbose
 `)
 	os.Exit(1)
@@ -128,7 +136,27 @@ func main() {
 		}
 
 		inputDir := os.Args[2]
-		outputDir := os.Args[3]
+		
+		// Check for multiple output directories
+		var outputDirs []string
+		if len(os.Args) > 4 {
+			// Check if the 4th argument is a flag (starts with '-')
+			if !strings.HasPrefix(os.Args[4], "-") {
+				// Multiple output directories pattern
+				for i := 3; i < len(os.Args); i++ {
+					if strings.HasPrefix(os.Args[i], "-") {
+						break
+					}
+					outputDirs = append(outputDirs, os.Args[i])
+				}
+			}
+		}
+		
+		// If no multiple output dirs found, use the traditional single output dir
+		mainOutputDir := os.Args[3]
+		if len(outputDirs) == 0 {
+			outputDirs = []string{mainOutputDir}
+		}
 
 		// Validate input directory
 		inputStat, err := os.Stat(inputDir)
@@ -151,8 +179,31 @@ func main() {
 		chunkVal := fs.Int("chunk", 2*1024*1024, "maximum candidate block size in bytes (default: 2MB)")
 		verboseVal := fs.Bool("verbose", false, "enable detailed debug output (includes all trace information)")
 		unzipVal := fs.Bool("unzip", false, "create directories for each collection instead of zip files")
-		fs.Parse(os.Args[4:])
+		
+		// Calculate where to start parsing flags - skip all output directories
+		flagsStartIndex := 4
+		if len(outputDirs) > 1 {
+			flagsStartIndex = 3 + len(outputDirs)
+		}
+		
+		// Make sure we don't go out of bounds
+		if flagsStartIndex < len(os.Args) {
+			fs.Parse(os.Args[flagsStartIndex:])
+		}
 
+		// If multiple output directories are provided, use their count as N
+		if len(outputDirs) > 1 {
+			// Check if -copies was also specified and they don't match
+			if fs.Lookup("copies").Value.String() != "2" { // 2 is the default
+				specifiedCopies, _ := strconv.Atoi(fs.Lookup("copies").Value.String())
+				if specifiedCopies != len(outputDirs) {
+					log.Fatalf("Error: Number of output directories (%d) does not match -copies value (%d)", 
+						len(outputDirs), specifiedCopies)
+				}
+			}
+			*nVal = len(outputDirs)
+		}
+		
 		// Validate flags
 		if *nVal < 2 || *nVal > 26 {
 			log.Fatalf("Error: Number of collections (-copies) must be between 2 and 26, got %d", *nVal)
@@ -162,8 +213,7 @@ func main() {
 			*reqVal = 2
 		}
 		if *reqVal > *nVal {
-			log.Printf("Warning: -required value %d cannot be greater than number of collections (-copies) %d; adjusting to %d", *reqVal, *nVal, *nVal)
-			*reqVal = *nVal
+			log.Fatalf("Error: -required value %d cannot be greater than number of collections (-copies) %d", *reqVal, *nVal)
 		}
 
 		*formatVal = strings.ToLower(*formatVal)
@@ -191,7 +241,8 @@ func main() {
 
 		cfg := padlock.EncodeConfig{
 			InputDir:        inputDir,
-			OutputDir:       outputDir,
+			OutputDir:       mainOutputDir,  // Still set this for backward compatibility
+			OutputDirs:      outputDirs,
 			N:               *nVal,
 			K:               *reqVal,
 			Format:          format,
@@ -213,27 +264,64 @@ func main() {
 			usage()
 		}
 
-		inputDir := os.Args[2]
-		outputDir := os.Args[3]
-
-		// Validate input directory
-		inputStat, err := os.Stat(inputDir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				log.Fatalf("Error: Input directory does not exist: %s", inputDir)
+		// First find where the flags start (if any)
+		flagIndex := -1
+		for i := 2; i < len(os.Args); i++ {
+			if strings.HasPrefix(os.Args[i], "-") {
+				flagIndex = i
+				break
 			}
-			log.Fatalf("Error: Cannot access input directory %s: %v", inputDir, err)
 		}
-		// Input must be a directory for decoding
-		if !inputStat.IsDir() {
-			log.Fatalf("Error: Input path is not a directory: %s. The input should be a directory containing collection subdirectories or ZIP files.", inputDir)
+
+		// If no flags were found, flagIndex is still -1
+		if flagIndex == -1 {
+			flagIndex = len(os.Args)
+		}
+
+		// Collect all the non-flag arguments
+		args := os.Args[2:flagIndex]
+		
+		// Need at least input and output
+		if len(args) < 2 {
+			usage()
+		}
+
+		// Last non-flag argument is the output directory
+		outputDir := args[len(args)-1]
+		// All other non-flag arguments are input directories
+		inputDirs := args[:len(args)-1]
+
+		// If we just have one input, use the traditional mode
+		if len(inputDirs) == 1 {
+			log.Printf("Traditional mode: InputDir=%s OutputDir=%s", inputDirs[0], outputDir)
+		} else {
+			log.Printf("Multi-directory mode: %d input directories, OutputDir=%s", len(inputDirs), outputDir)
+		}
+
+		// Validate input directories
+		for _, dir := range inputDirs {
+			inputStat, err := os.Stat(dir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					log.Fatalf("Error: Input directory does not exist: %s", dir)
+				}
+				log.Fatalf("Error: Cannot access input directory %s: %v", dir, err)
+			}
+			// Input must be a directory for decoding
+			if !inputStat.IsDir() {
+				log.Fatalf("Error: Input path is not a directory: %s. The input should be a directory containing collection subdirectories or ZIP files.", dir)
+			}
 		}
 
 		// Parse flags
 		fs := flag.NewFlagSet("decode", flag.ExitOnError)
 		clearVal := fs.Bool("clear", false, "clear output directory if not empty")
 		verboseVal := fs.Bool("verbose", false, "enable detailed debug output (includes all trace information)")
-		fs.Parse(os.Args[4:])
+		
+		// Parse flags if there are any
+		if flagIndex < len(os.Args) {
+			fs.Parse(os.Args[flagIndex:])
+		}
 
 		// Create context with tracer
 		ctx := context.Background()
@@ -249,7 +337,8 @@ func main() {
 
 		// Create config
 		cfg := padlock.DecodeConfig{
-			InputDir:        inputDir,
+			InputDir:        inputDirs[0], // First input dir for backward compatibility
+			InputDirs:       inputDirs,
 			OutputDir:       outputDir,
 			RNG:             rng,
 			Verbose:         *verboseVal,
