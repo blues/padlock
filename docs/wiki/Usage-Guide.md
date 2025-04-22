@@ -46,7 +46,7 @@ padlock encode <inputDir> <outputDir> [options]
 - `-clear`: Clear output directory if not empty
 - `-chunk SIZE`: Maximum candidate block size in bytes (default: 2MB)
 - `-verbose`: Enable detailed debug output
-- `-zip`: Create zip files for each collection instead of directories
+- `-files`: Create individual files for each collection instead of TAR archives (default: creates TAR archives)
 
 #### Examples
 
@@ -55,9 +55,9 @@ Create 3 collections where any 2 can reconstruct the data, in PNG format:
 padlock encode ~/Documents/secret ~/Collections -copies 3 -required 2 -format png
 ```
 
-Create 5 collections where any 3 are required, with ZIP archives:
+Create 5 collections where any 3 are required, using TAR archives (default behavior):
 ```bash
-padlock encode ~/Documents/top-secret ~/Collections -copies 5 -required 3 -zip
+padlock encode ~/Documents/top-secret ~/Collections -copies 5 -required 3
 ```
 
 Enable verbose logging for debugging:
@@ -130,28 +130,33 @@ For maximum security, distribute collections across different storage locations:
 3. **Geographic Distribution**: Store collections in different physical locations
 4. **Time-Based Distribution**: Transfer collections at different times to reduce correlation
 
-### Handling ZIP Collections
+### Handling TAR Collections
 
-When using the `-zip` option, Padlock creates ZIP archives for each collection:
-
-```bash
-padlock encode ~/Documents/secret ~/Collections -copies 3 -required 2 -zip
-```
-
-This creates files like `Collection-3A5.zip`, `Collection-3B5.zip`, etc., which can be easily distributed.
-
-For decoding, you can either:
-1. Extract the ZIP files manually and point to the extracted directory
-2. Place the ZIP files in a directory and point Padlock to that directory (it will extract them automatically)
+By default, Padlock creates TAR archives for each collection:
 
 ```bash
-# Option 1: Manual extraction
-unzip "Collection-*.zip" -d ~/ExtractedCollections
-padlock decode ~/ExtractedCollections ~/Restored
-
-# Option 2: Automatic extraction
-padlock decode ~/ZippedCollections ~/Restored
+padlock encode ~/Documents/secret ~/Collections -copies 3 -required 2
 ```
+
+This creates files like `3A5.tar`, `3B5.tar`, etc., which can be easily distributed.
+
+If you prefer working with individual files instead of TAR archives, use the `-files` option:
+
+```bash
+padlock encode ~/Documents/secret ~/Collections -copies 3 -required 2 -files
+```
+
+For decoding, Padlock automatically detects and handles both formats:
+
+```bash
+# Decoding from TAR archives
+padlock decode ~/Collections ~/Restored
+
+# Decoding from directories containing individual files
+padlock decode ~/Collections ~/Restored
+```
+
+Padlock intelligently processes TAR files as streams during both encoding and decoding, making it memory-efficient even for very large datasets.
 
 ## Best Practices
 

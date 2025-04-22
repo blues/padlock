@@ -38,8 +38,8 @@
 //	# Enable verbose logging for debugging
 //	padlock encode /path/to/input /path/to/output -verbose
 //
-//	# Create directories for each collection instead of ZIP files
-//	padlock encode /path/to/input /path/to/output -unzip
+//	# Create individual files for each collection instead of TAR archives
+//	padlock encode /path/to/input /path/to/output -files
 //
 // Security considerations:
 // - Never reuse the same collections for different data (violates one-time pad security)

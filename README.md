@@ -301,7 +301,7 @@ go build -o padlock cmd/padlock/main.go
 
 - **Encode:**
 
-  padlock encode <inputDir> <outputDir> -copies 5 -required 3 -format png -chunk 2097152 [-clear] [-verbose] [-zip]
+  padlock encode <inputDir> <outputDir> -copies 5 -required 3 -format png -chunk 2097152 [-clear] [-verbose] [-files]
 
   - `<inputDir>`: Directory containing the data to be archived and encoded.
   - `<outputDir>`: Destination directory for the generated collection subdirectories.
@@ -311,7 +311,7 @@ go build -o padlock cmd/padlock/main.go
   - `-chunk`: Maximum chunk size in bytes.
   - `-clear`: (Optional) Clears the output directory before encoding.
   - `-verbose`: (Optional) Enables detailed trace/debug messages.
-  - `-zip`: (Optional) Creates ZIP archives for each collection instead of directories.
+  - `-files`: (Optional) Creates individual files for each collection instead of TAR archives.
 
 - **Decode:**
 

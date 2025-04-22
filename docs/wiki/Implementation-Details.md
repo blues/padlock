@@ -155,13 +155,14 @@ The PNG output format option provides several advantages:
 2. **Steganographic Properties**: Encoded data looks like normal image files
 3. **Portability**: PNG files are less likely to be modified by transfer systems
 
-### ZIP Collection Support
+### TAR Collection Support
 
-The option to create ZIP archives for collections provides:
+The default option to create TAR archives for collections provides:
 
-1. **Ease of Distribution**: Single files are easier to transfer than directories
-2. **Compression**: ZIP provides additional compression for efficiency
-3. **Metadata Preservation**: ZIP preserves file attributes and timestamps
+1. **Streaming Processing**: TAR files are processed as streams for memory efficiency
+2. **Ease of Distribution**: Single files are easier to transfer than directories
+3. **Metadata Preservation**: TAR preserves file attributes and timestamps
+4. **High Performance**: Direct streaming without intermediate disk operations
 
 ## Performance Considerations
 
