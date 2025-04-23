@@ -38,6 +38,8 @@
 package padlock
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -50,6 +52,188 @@ import (
 	"github.com/blues/padlock/pkg/pad"
 	"github.com/blues/padlock/pkg/trace"
 )
+
+// SizeTracker helps track file sizes during encoding and decoding.
+// This allows for implementing the -dryrun feature that reports size information
+// without actually writing output files.
+type SizeTracker struct {
+	// InputSize is the total size of the input data in bytes
+	InputSize int64
+	
+	// CompressedInputSize is the size of the input data after compression
+	CompressedInputSize int64
+	
+	// EncodeCollectionsTotalSize is the sum of sizes of all collections
+	EncodeCollectionsTotalSize int64
+	
+	// EncodeCollectionsSizes contains the size of each individual collection
+	EncodeCollectionsSizes map[string]int64
+	
+	// DecodeOutputSize is the size of the fully expanded output data
+	DecodeOutputSize int64
+}
+
+// FormatByteSize formats a byte count with thousands separators for better readability
+func FormatByteSize(bytes int64) string {
+	// Handle negative values
+	if bytes < 0 {
+		return "-" + FormatByteSize(-bytes)
+	}
+	
+	// Format number with commas
+	str := fmt.Sprintf("%d", bytes)
+	result := ""
+	for i, ch := range str {
+		if i > 0 && (len(str)-i)%3 == 0 {
+			result += ","
+		}
+		result += string(ch)
+	}
+	return result
+}
+
+// SizeTrackingWriter is an io.Writer implementation that counts bytes without writing them.
+// It can be used as a replacement for an actual file writer when only calculating sizes.
+type SizeTrackingWriter struct {
+	// Size tracks the total bytes "written"
+	Size int64
+	
+	// CollectionName tracks which collection this writer is for
+	CollectionName string
+	
+	// SizeTracker reference to update the central size tracker
+	Tracker *SizeTracker
+}
+
+// NewSizeTrackingWriter creates a new SizeTrackingWriter instance.
+func NewSizeTrackingWriter(collectionName string, tracker *SizeTracker) *SizeTrackingWriter {
+	return &SizeTrackingWriter{
+		Size:           0,
+		CollectionName: collectionName,
+		Tracker:        tracker,
+	}
+}
+
+// Write implements the io.Writer interface. Instead of writing to a file,
+// it simply counts the bytes and updates the size counters.
+func (w *SizeTrackingWriter) Write(p []byte) (n int, err error) {
+	size := len(p)
+	w.Size += int64(size)
+	
+	// Update the collection's size in the tracker if we're tracking a collection
+	if w.CollectionName != "" && w.Tracker != nil {
+		if w.Tracker.EncodeCollectionsSizes == nil {
+			w.Tracker.EncodeCollectionsSizes = make(map[string]int64)
+		}
+		w.Tracker.EncodeCollectionsSizes[w.CollectionName] += int64(size)
+		w.Tracker.EncodeCollectionsTotalSize += int64(size)
+	}
+	
+	return size, nil
+}
+
+// Close implements the io.Closer interface.
+func (w *SizeTrackingWriter) Close() error {
+	return nil
+}
+
+// SizeTrackingWriteCloser is an interface combining both io.Writer and io.Closer.
+type SizeTrackingWriteCloser interface {
+	io.Writer
+	io.Closer
+}
+
+// SizeTrackingReader wraps an io.Reader to count bytes as they're read.
+// This helps track the size of input/output streams during the size-only operation.
+type SizeTrackingReader struct {
+	Reader io.Reader
+	Size   int64
+	Tracker *SizeTracker
+	IsInput bool // Whether this is tracking input (true) or output (false)
+}
+
+// NewSizeTrackingReader creates a new SizeTrackingReader instance.
+func NewSizeTrackingReader(reader io.Reader, tracker *SizeTracker, isInput bool) *SizeTrackingReader {
+	return &SizeTrackingReader{
+		Reader:  reader,
+		Size:    0,
+		Tracker: tracker,
+		IsInput: isInput,
+	}
+}
+
+// Read implements the io.Reader interface. It proxies reads to the underlying reader
+// while counting the bytes that pass through.
+func (r *SizeTrackingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.Size += int64(n)
+	
+	// Update the appropriate tracker field based on whether this is input or output
+	if r.Tracker != nil {
+		if r.IsInput {
+			r.Tracker.InputSize = r.Size
+		} else {
+			r.Tracker.DecodeOutputSize = r.Size
+		}
+	}
+	
+	return n, err
+}
+
+// Close implements the io.Closer interface if the underlying reader supports it.
+func (r *SizeTrackingReader) Close() error {
+	if closer, ok := r.Reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+// SizeTrackingReadCloser combines io.Reader and io.Closer.
+type SizeTrackingReadCloser interface {
+	io.Reader
+	io.Closer
+}
+
+// compressForDryRun performs a complete in-memory compression of the input data
+// to accurately measure the size of compressed data during a dry run.
+func compressForDryRun(ctx context.Context, inputStream io.Reader, sizeTracker *SizeTracker) (io.Reader, error) {
+	log := trace.FromContext(ctx).WithPrefix("padlock")
+	
+	// Read all the uncompressed data
+	uncompressedData, err := io.ReadAll(inputStream)
+	if err != nil {
+		log.Error(fmt.Errorf("failed to read input data: %w", err))
+		return nil, err
+	}
+	
+	// Store the uncompressed size
+	sizeTracker.InputSize = int64(len(uncompressedData))
+	log.Debugf("Uncompressed input size: %d bytes", sizeTracker.InputSize)
+	
+	// Create a buffer for compressed data
+	var compressedBuf bytes.Buffer
+	
+	// Compress the data
+	gzw := gzip.NewWriter(&compressedBuf)
+	_, err = gzw.Write(uncompressedData)
+	if err != nil {
+		log.Error(fmt.Errorf("failed to compress data: %w", err))
+		return nil, err
+	}
+	
+	// Close the gzip writer to flush any remaining data
+	if err := gzw.Close(); err != nil {
+		log.Error(fmt.Errorf("failed to close gzip writer: %w", err))
+		return nil, err
+	}
+	
+	// Store the compressed size
+	sizeTracker.CompressedInputSize = int64(compressedBuf.Len())
+	log.Debugf("Compressed input size: %d bytes", sizeTracker.CompressedInputSize)
+	
+	// Return a reader for the compressed data
+	return bytes.NewReader(compressedBuf.Bytes()), nil
+}
 
 // Format is a type alias for file.Format, representing the output format for collections.
 // A Format determines how data chunks are written to and read from the filesystem.
@@ -94,6 +278,7 @@ type EncodeConfig struct {
 	Verbose            bool        // Enable verbose logging
 	Compression        Compression // Compression mode for the serialized data
 	ArchiveCollections bool        // Whether to create TAR archives for collections
+	SizeOnly           bool        // Whether to only calculate sizes without writing output files (dryrun mode)
 }
 
 // DecodeConfig holds configuration parameters for the decoding operation.
@@ -106,6 +291,7 @@ type DecodeConfig struct {
 	Verbose         bool        // Enable verbose logging
 	Compression     Compression // Compression mode used when the data was encoded
 	ClearIfNotEmpty bool        // Whether to clear the output directory if not empty
+	SizeOnly        bool        // Whether to only calculate sizes without writing output files (dryrun mode)
 }
 
 // EncodeDirectory encodes a directory using the padlock K-of-N threshold scheme.
@@ -131,7 +317,7 @@ type DecodeConfig struct {
 // Any K or more collections can be used to reconstruct the original data, while
 // K-1 or fewer collections reveal absolutely nothing about the original data.
 func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
-	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
+	log := trace.FromContext(ctx).WithPrefix("padlock")
 	start := time.Now()
 	
 	// Log differently depending on whether using single or multiple output directories
@@ -150,19 +336,24 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		return err
 	}
 
-	// Prepare all output directories, clearing them if requested and they're not empty
-	if len(cfg.OutputDirs) > 1 {
-		// When using multiple output directories - prepare each one individually
-		for _, dir := range cfg.OutputDirs {
-			if err := file.PrepareOutputDirectory(ctx, dir, cfg.ClearIfNotEmpty); err != nil {
+	// In dry run mode, we don't need to prepare output directories
+	if !cfg.SizeOnly {
+		// Prepare all output directories, clearing them if requested and they're not empty
+		if len(cfg.OutputDirs) > 1 {
+			// When using multiple output directories - prepare each one individually
+			for _, dir := range cfg.OutputDirs {
+				if err := file.PrepareOutputDirectory(ctx, dir, cfg.ClearIfNotEmpty); err != nil {
+					return err
+				}
+			}
+		} else {
+			// Traditional single output directory approach
+			if err := file.PrepareOutputDirectory(ctx, cfg.OutputDir, cfg.ClearIfNotEmpty); err != nil {
 				return err
 			}
 		}
 	} else {
-		// Traditional single output directory approach
-		if err := file.PrepareOutputDirectory(ctx, cfg.OutputDir, cfg.ClearIfNotEmpty); err != nil {
-			return err
-		}
+		log.Infof("Running in dry run mode - skipping output directory preparation")
 	}
 
 	// Create a new pad instance with the specified N and K parameters
@@ -173,10 +364,36 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		log.Error(fmt.Errorf("failed to create pad instance: %w", err))
 		return err
 	}
+	
+	// Initialize size tracker if we're in size-only mode
+	var sizeTracker *SizeTracker
+	if cfg.SizeOnly {
+		sizeTracker = &SizeTracker{
+			InputSize:                 0,
+			CompressedInputSize:       0,
+			EncodeCollectionsTotalSize: 0,
+			EncodeCollectionsSizes:    make(map[string]int64),
+			DecodeOutputSize:          0,
+		}
+		p.SizeTracker = sizeTracker
+	}
 
 	// Create collections based on the configuration
 	var collections []file.Collection
-	if len(cfg.OutputDirs) > 1 {
+	
+	// In dry run mode, we don't need to actually create collection directories
+	if cfg.SizeOnly {
+		// Just set up virtual collections for dry run
+		collections = make([]file.Collection, len(p.Collections))
+		for i, collName := range p.Collections {
+			collections[i] = file.Collection{
+				Name: collName,
+				Path: "dryrun-" + collName, // Use a placeholder path
+				Format: cfg.Format,
+			}
+			log.Debugf("Created virtual collection %d for dry run: %s", i+1, collName)
+		}
+	} else if len(cfg.OutputDirs) > 1 {
 		// Use multiple output directories - one collection per directory
 		if len(cfg.OutputDirs) != len(p.Collections) {
 			return fmt.Errorf("number of output directories (%d) does not match number of collections (%d)",
@@ -240,7 +457,18 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	var inputStream io.Reader = tarStream
 	if cfg.Compression == CompressionGzip {
 		log.Debugf("Adding gzip compression to stream")
-		inputStream = file.CompressStreamToStream(ctx, tarStream)
+		
+		// If we're in size-only mode, use in-memory compression to track sizes accurately
+		if cfg.SizeOnly && sizeTracker != nil {
+			var err error
+			inputStream, err = compressForDryRun(ctx, tarStream, sizeTracker)
+			if err != nil {
+				log.Error(fmt.Errorf("failed to compress for dry run: %w", err))
+				return fmt.Errorf("failed to compress for dry run: %w", err)
+			}
+		} else {
+			inputStream = file.CompressStreamToStream(ctx, tarStream)
+		}
 	}
 
 	// Define a callback function that creates chunk writers for the encoding process
@@ -249,6 +477,11 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	// When archive collections is enabled, this will create TarChunkWriters to write
 	// chunks directly to TAR files instead of temporary files on disk.
 	newChunkFunc := func(collectionName string, chunkNumber int, chunkFormat string) (io.WriteCloser, error) {
+		// If in size-only mode, use SizeTrackingWriter instead of actual file writers
+		if cfg.SizeOnly && sizeTracker != nil {
+			return NewSizeTrackingWriter(collectionName, sizeTracker), nil
+		}
+	
 		// Find the collection path for the given collection name
 		var collPath string
 		var found bool
@@ -324,9 +557,12 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		return fmt.Errorf("encoding failed: %w", err)
 	}
 
-	// If archives were enabled, the chunks have already been written directly to TAR files
-	// We need to finalize the TAR writers to ensure they're properly closed
-	if cfg.ArchiveCollections {
+	// Skip archive finalization in dry run mode
+	if cfg.SizeOnly {
+		log.Debugf("Skipping archive finalization in dry run mode")
+	} else if cfg.ArchiveCollections {
+		// If archives were enabled, the chunks have already been written directly to TAR files
+		// We need to finalize the TAR writers to ensure they're properly closed
 		// Finalize all TAR writers to ensure proper closing
 		log.Debugf("Finalizing all TAR writers created during encoding")
 		if err := file.FinalizeAllTarWriters(ctx); err != nil {
@@ -383,6 +619,46 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	// Log completion information including elapsed time
 	elapsed := time.Since(start)
 	
+	// Display dry run information if in size-only mode
+	if cfg.SizeOnly && sizeTracker != nil {
+		// Output the size report with asterisk lines at beginning and end
+		log.Infof("*** DRY RUN SIZE REPORT ***")
+		
+		log.Infof("Original input size:              %s bytes", FormatByteSize(sizeTracker.InputSize))
+		
+		if cfg.Compression == CompressionGzip && sizeTracker.CompressedInputSize > 0 {
+			log.Infof("Compressed input size:            %s bytes", FormatByteSize(sizeTracker.CompressedInputSize))
+			
+			// Calculate compression ratio
+			compressionRatio := 0.0
+			if sizeTracker.InputSize > 0 {
+				compressionRatio = float64(sizeTracker.CompressedInputSize) / float64(sizeTracker.InputSize) * 100.0
+			}
+			log.Infof("Compression ratio:                %.2f%%", compressionRatio)
+		}
+		
+		if sizeTracker.EncodeCollectionsTotalSize > 0 {
+			// Calculate each collection size as an integer (all collections are same size)
+			eachCollectionSize := int64(0)
+			if len(sizeTracker.EncodeCollectionsSizes) > 0 {
+				eachCollectionSize = sizeTracker.EncodeCollectionsTotalSize / int64(len(sizeTracker.EncodeCollectionsSizes))
+			}
+			
+			log.Infof("Each collection size:             %s bytes", FormatByteSize(eachCollectionSize))
+			log.Infof("Total size of all collections:    %s bytes", FormatByteSize(sizeTracker.EncodeCollectionsTotalSize))
+			
+			// Calculate expansion ratio (total collections size / original input size)
+			expansionRatio := 0.0
+			if sizeTracker.InputSize > 0 {
+				expansionRatio = float64(sizeTracker.EncodeCollectionsTotalSize) / float64(sizeTracker.InputSize) * 100.0
+			}
+			log.Infof("Expansion ratio:                  %.2f%%", expansionRatio)
+		}
+		
+		// End the report with an asterisk line
+		log.Infof("***")
+	}
+	
 	// Log differently depending on whether using single or multiple output directories
 	if len(cfg.OutputDirs) <= 1 {
 		log.Infof("Encode complete (%s) -copies %d -required %d -format %s", elapsed, cfg.N, cfg.K, cfg.Format)
@@ -396,7 +672,7 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 
 // isValidCollectionDir checks if a directory is likely to contain a valid collection
 func isValidCollectionDir(ctx context.Context, dirPath string) bool {
-	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
+	log := trace.FromContext(ctx).WithPrefix("padlock")
 	log.Debugf("Checking if %s is a valid collection directory", dirPath)
 	
 	// Try to determine collection format
@@ -412,7 +688,7 @@ func isValidCollectionDir(ctx context.Context, dirPath string) bool {
 
 // determineCollectionNameFromContent tries to deduce the collection name by examining files
 func determineCollectionNameFromContent(ctx context.Context, dirPath string) (string, error) {
-	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
+	log := trace.FromContext(ctx).WithPrefix("padlock")
 	
 	// Read the directory
 	entries, err := os.ReadDir(dirPath)
@@ -475,7 +751,7 @@ func determineCollectionNameFromContent(ctx context.Context, dirPath string) (st
 // and no information about the original data can be recovered due to the information-theoretic
 // security properties of the threshold scheme.
 func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
-	log := trace.FromContext(ctx).WithPrefix("PADLOCK")
+	log := trace.FromContext(ctx).WithPrefix("padlock")
 	start := time.Now()
 	
 	// Log differently depending on whether using single or multiple input directories
@@ -488,9 +764,14 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		}
 	}
 
-	// Prepare the output directory, clearing it if requested and it's not empty
-	if err := file.PrepareOutputDirectory(ctx, cfg.OutputDir, cfg.ClearIfNotEmpty); err != nil {
-		return err
+	// In dry run mode, we don't need to prepare output directories
+	if !cfg.SizeOnly {
+		// Prepare the output directory, clearing it if requested and it's not empty
+		if err := file.PrepareOutputDirectory(ctx, cfg.OutputDir, cfg.ClearIfNotEmpty); err != nil {
+			return err
+		}
+	} else {
+		log.Infof("Running in dry run mode - skipping output directory preparation")
 	}
 
 	// Variable to hold all collected collections and a tempDir if needed
@@ -610,6 +891,29 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	n := len(allCollections)
 	log.Infof("Collections: %d", n)
 
+	// Create a new pad instance for decoding
+	// The pad is initialized with the number of available collections
+	// The K value will be extracted from the collection metadata during decoding
+	log.Debugf("Creating pad instance with N=%d", n)
+	p, err := pad.NewPadForDecode(ctx, n)
+	if err != nil {
+		log.Error(fmt.Errorf("failed to create pad instance: %w", err))
+		return err
+	}
+	
+	// Initialize size tracker if we're in size-only mode
+	var sizeTracker *SizeTracker
+	if cfg.SizeOnly {
+		sizeTracker = &SizeTracker{
+			InputSize:                 0,
+			CompressedInputSize:       0,
+			EncodeCollectionsTotalSize: 0,
+			EncodeCollectionsSizes:    make(map[string]int64),
+			DecodeOutputSize:          0,
+		}
+		p.SizeTracker = sizeTracker
+	}
+
 	// Create a pipe for transferring decoded data between goroutines
 	// This allows parallel processing of decoding and deserialization
 	log.Debugf("Creating pipe for decoded data")
@@ -625,7 +929,7 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		defer close(done) // Signal completion via the done channel
 		defer pr.Close()  // Ensure pipe reader is closed when this goroutine exits
 
-		deserializeCtx := trace.WithContext(ctx, log.WithPrefix("DESERIALIZE"))
+		deserializeCtx := trace.WithContext(ctx, log.WithPrefix("deserialize"))
 
 		// Create decompression stream if needed
 		// This reverses any compression applied during encoding
@@ -644,28 +948,35 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		// Deserialize the tar stream to the output directory
 		// This reconstructs the original directory structure and files
 		log.Debugf("Deserializing to output directory: %s", cfg.OutputDir)
-		err := file.DeserializeDirectoryFromStream(deserializeCtx, cfg.OutputDir, outputStream, cfg.ClearIfNotEmpty)
-		if err != nil {
-			// Special case: Don't treat "too small" tar file as an error for small inputs
-			if strings.Contains(err.Error(), "too small to be a valid tar file") {
-				log.Infof("Input data appears to be a small raw file rather than a tar archive")
-				deserializeErr = nil
-			} else {
-				log.Error(fmt.Errorf("failed to deserialize directory: %w", err))
+		
+		// If we're in dry run mode, wrap the output stream with a size tracker
+		// and just read through the data without writing to disk
+		if cfg.SizeOnly && sizeTracker != nil {
+			log.Debugf("Performing dry run size tracking without writing files")
+			
+			// Wrap the output stream with our size tracker
+			trackingReader := NewSizeTrackingReader(outputStream, sizeTracker, false) // false = output stream
+			
+			// Just read through the entire stream to count bytes, but don't write to disk
+			_, err := io.Copy(io.Discard, trackingReader)
+			if err != nil {
+				log.Error(fmt.Errorf("failed to read output stream for size tracking: %w", err))
 				deserializeErr = err
+			}
+		} else {
+			// Normal processing mode - actually deserialize to disk
+			err := file.DeserializeDirectoryFromStream(deserializeCtx, cfg.OutputDir, outputStream, cfg.ClearIfNotEmpty)
+			if err != nil {
+				// Special case: Don't treat "too small" tar file as an error for small inputs
+				if strings.Contains(err.Error(), "too small to be a valid tar file") {
+					log.Infof("Input data appears to be a small raw file rather than a tar archive")
+				} else {
+					log.Error(fmt.Errorf("failed to deserialize directory: %w", err))
+					deserializeErr = err
+				}
 			}
 		}
 	}()
-
-	// Create a new pad instance for decoding
-	// The pad is initialized with the number of available collections
-	// The K value will be extracted from the collection metadata during decoding
-	log.Debugf("Creating pad instance with N=%d", n)
-	p, err := pad.NewPadForDecode(ctx, n)
-	if err != nil {
-		log.Error(fmt.Errorf("failed to create pad instance: %w", err))
-		return err
-	}
 
 	// Run the decoding process
 	log.Debugf("Starting decode process")
@@ -715,6 +1026,52 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 
 	// Log completion information including elapsed time
 	elapsed := time.Since(start)
+	
+	// Display dry run information if in size-only mode
+	if cfg.SizeOnly && sizeTracker != nil {
+		// Output the size report with asterisk lines at beginning and end
+		log.Infof("*** DRY RUN SIZE REPORT ***")
+		
+		// Calculate and report total size of input collections
+		totalInputSize := int64(0)
+		
+		// Calculate total collection size by checking actual files
+		for _, inputDir := range cfg.InputDirs {
+			// Check if it's a directory or a file
+			fileInfo, err := os.Stat(inputDir)
+			if err == nil {
+				if fileInfo.IsDir() {
+					// Sum up all files in the directory
+					err := filepath.Walk(inputDir, func(path string, info os.FileInfo, err error) error {
+						if err != nil {
+							return nil // skip on error
+						}
+						if !info.IsDir() {
+							totalInputSize += info.Size()
+						}
+						return nil
+					})
+					if err != nil {
+						log.Debugf("Error walking directory %s: %v", inputDir, err)
+					}
+				} else {
+					// It's a single file
+					totalInputSize += fileInfo.Size()
+				}
+			}
+		}
+		
+		log.Infof("Total size of input collections:  %s bytes", FormatByteSize(totalInputSize))
+		
+		// Report output size if available
+		if sizeTracker.DecodeOutputSize > 0 {
+			log.Infof("Decompressed output size:        %s bytes", FormatByteSize(sizeTracker.DecodeOutputSize))
+		}
+		
+		// End the report with an asterisk line
+		log.Infof("***")
+	}
+	
 	log.Infof("Decode complete (%s)", elapsed)
 	return nil
 }

@@ -67,6 +67,7 @@ type Pad struct {
 	PermutationCount int                 // Number of unique combinations for K-of-N
 	Permutations     map[string][]string // Unique combinations for each collection (maps collection letter to array of permutations)
 	Ciphers          map[string][][]byte // Unique K-of-N combinations as byte slices (maps permutation key to array of byte slices)
+	SizeTracker      interface{}         // Tracks file sizes during encoding and decoding operations
 }
 
 // NewPadForEncode creates a new Pad instance with the specified parameters for a K-of-N threshold scheme.
@@ -126,7 +127,7 @@ func NewPadForDecode(ctx context.Context, availableCopies int) (*Pad, error) {
 //
 // For example, with K=3, N=5, the collections would be: ["3A5", "3B5", "3C5", "3D5", "3E5"]
 func PadInit(ctx context.Context, p *Pad, totalCopies, requiredCopies int) error {
-	log := trace.FromContext(ctx).WithPrefix("PAD-INIT")
+	log := trace.FromContext(ctx).WithPrefix("pad-init")
 	// Validate parameters to ensure they meet the requirements of the threshold scheme
 	if totalCopies < 2 || totalCopies > 26 {
 		return fmt.Errorf("totalCopies must be between 2 and 26, got %d", totalCopies)
@@ -411,7 +412,7 @@ func UniqueSortedCombinations(K, N int) (int, map[string][]string, map[string][]
 //   - The same pad must NEVER be reused
 //   - Each chunk has a unique name to ensure it's properly tracked during decoding
 func (p *Pad) Encode(ctx context.Context, outputChunkBytes int, input io.Reader, randomSource RNG, newChunk NewChunkFunc, chunkFormat string) error {
-	log := trace.FromContext(ctx).WithPrefix("ENCODE")
+	log := trace.FromContext(ctx).WithPrefix("encode")
 
 	// Compute a size of input to process in each chunk, given the number of ciphers that must fit into the chunk
 	inputChunkBytes := outputChunkBytes / p.PermutationCount
@@ -494,7 +495,7 @@ func (p *Pad) Encode(ctx context.Context, outputChunkBytes int, input io.Reader,
 //   - System has mathematical, not just computational, security guarantees
 //   - Security level is independent of chunk size - even 1-byte chunks have perfect secrecy
 func (p *Pad) encodeOneChunk(ctx context.Context, chunkData []byte, chunkNumber int, randomSource RNG, newChunk NewChunkFunc, chunkFormat string) error {
-	log := trace.FromContext(ctx).WithPrefix("ENCODE")
+	log := trace.FromContext(ctx).WithPrefix("encode")
 
 	// Handle the actual size of the input data, which may be less than a full chunk
 	chunkDataBytes := len(chunkData)
@@ -564,7 +565,7 @@ func (p *Pad) encodeOneChunk(ctx context.Context, chunkData []byte, chunkNumber 
 		w.Close()
 	}
 
-	log.Debugf("Chunk %d: completed successfully", chunkNumber)
+	log.Infof("chunk %d completed successfully", chunkNumber)
 	return nil
 }
 
@@ -594,7 +595,7 @@ func (p *Pad) encodeOneChunk(ctx context.Context, chunkData []byte, chunkNumber 
 //   - Chunk numbers and collection names are verified for consistency
 //   - The decoding process is deterministic and will produce the exact original data
 func (p *Pad) Decode(ctx context.Context, collections []io.Reader, output io.Writer) error {
-	log := trace.FromContext(ctx).WithPrefix("DECODE")
+	log := trace.FromContext(ctx).WithPrefix("decode")
 
 	log.Debugf("Starting decode with %d collections", len(collections))
 

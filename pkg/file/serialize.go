@@ -18,7 +18,7 @@ import (
 // SerializeDirectoryToStream takes an input directory path and generates an io.Reader
 // which is a 'tar' stream of the entire directory.
 func SerializeDirectoryToStream(ctx context.Context, inputDir string) (io.ReadCloser, error) {
-	log := trace.FromContext(ctx).WithPrefix("SERIALIZE")
+	log := trace.FromContext(ctx).WithPrefix("serialize")
 	log.Debugf("Serializing directory to tar stream: %s", inputDir)
 	pr, pw := io.Pipe()
 
@@ -92,7 +92,7 @@ func SerializeDirectoryToStream(ctx context.Context, inputDir string) (io.ReadCl
 
 			fileCount++
 			totalBytes += n
-			log.Debugf("Added to tar: %s (%d bytes)", rel, n)
+			log.Infof("%s (%d bytes)", rel, n)
 
 			return nil
 		})
@@ -112,7 +112,7 @@ func SerializeDirectoryToStream(ctx context.Context, inputDir string) (io.ReadCl
 // DeserializeDirectoryFromStream takes a tar stream and extracts its contents
 // to the specified output directory. It returns errors encountered during extraction.
 func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.Reader, clearIfNotEmpty bool) error {
-	log := trace.FromContext(ctx).WithPrefix("DESERIALIZE")
+	log := trace.FromContext(ctx).WithPrefix("deserialize")
 	log.Debugf("Deserializing to directory: %s", outputDir)
 
 	// Ensure the output directory can be written to
@@ -331,7 +331,7 @@ func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.
 
 // prepareOutputDirectory ensures the output directory is empty for deserialization
 func prepareOutputDirectory(ctx context.Context, dirPath string, clearIfNotEmpty bool) error {
-	log := trace.FromContext(ctx).WithPrefix("DESERIALIZE")
+	log := trace.FromContext(ctx).WithPrefix("deserialize")
 	log.Debugf("Preparing output directory: %s (clear=%v)", dirPath, clearIfNotEmpty)
 
 	// Create the directory if it doesn't exist

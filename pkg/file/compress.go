@@ -15,7 +15,7 @@ import (
 // CompressStreamToStream takes an io.Reader that it can read from and returns an io.Reader
 // where it writes a compressed form of the stream using gzip.
 func CompressStreamToStream(ctx context.Context, r io.Reader) io.Reader {
-	log := trace.FromContext(ctx).WithPrefix("COMPRESS")
+	log := trace.FromContext(ctx).WithPrefix("compress")
 	log.Debugf("Starting compression of stream")
 	pr, pw := io.Pipe()
 
@@ -48,7 +48,7 @@ func CompressStreamToStream(ctx context.Context, r io.Reader) io.Reader {
 // DecompressStreamToStream takes a compressed io.Reader that it can read from and returns an io.Reader
 // where it writes the decompressed form of the stream.
 func DecompressStreamToStream(ctx context.Context, r io.Reader) (io.Reader, error) {
-	log := trace.FromContext(ctx).WithPrefix("DECOMPRESS")
+	log := trace.FromContext(ctx).WithPrefix("decompress")
 	log.Debugf("Starting decompression of stream")
 
 	// Use a buffer to peek at the first 2 bytes without consuming the stream
