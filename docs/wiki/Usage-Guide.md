@@ -47,6 +47,7 @@ padlock encode <inputDir> <outputDir> [options]
 - `-chunk SIZE`: Maximum candidate block size in bytes (default: 2MB)
 - `-verbose`: Enable detailed debug output
 - `-files`: Create individual files for each collection instead of TAR archives (default: creates TAR archives)
+- `-dryrun`: Calculate and display size information without actually writing output files
 
 #### Examples
 
@@ -63,6 +64,11 @@ padlock encode ~/Documents/top-secret ~/Collections -copies 5 -required 3
 Enable verbose logging for debugging:
 ```bash
 padlock encode ~/Documents/confidential ~/Collections -copies 4 -required 2 -verbose
+```
+
+Run in dry-run mode to see size information without writing files:
+```bash
+padlock encode ~/Documents/confidential ~/Collections -copies 4 -required 2 -dryrun
 ```
 
 ### Decoding Data
@@ -82,6 +88,7 @@ padlock decode <inputDir> <outputDir> [options]
 
 - `-clear`: Clear output directory if not empty
 - `-verbose`: Enable detailed debug output
+- `-dryrun`: Calculate and display size information without actually writing output files
 
 #### Examples
 
@@ -100,7 +107,56 @@ Enable verbose logging for debugging:
 padlock decode ~/Collections ~/Restored -verbose
 ```
 
+Run in dry-run mode to preview sizes without actually decoding:
+```bash
+padlock decode ~/Collections ~/Restored -dryrun
+```
+
 ## Advanced Usage
+
+### Using Dry Run Mode
+
+The dry run mode allows you to see exactly how much disk space will be required without actually writing any files. This is useful for planning storage requirements or testing configurations.
+
+#### Dry Run for Encoding
+
+When running encode with the `-dryrun` flag, Padlock will:
+- Calculate the total input size
+- Compress the input data (in memory) and report the compressed size
+- Calculate the size of each collection that would be generated
+- Show the total size of all collections
+- Display compression and expansion ratios
+
+Example output:
+```
+***
+padlock: Dry run mode - no files will be created
+padlock: Total input size:              123,456,789 bytes
+padlock: Compressed input size:          78,901,234 bytes (compression ratio: 1.56:1)
+padlock: Each collection size:           53,657,931 bytes
+padlock: Total size of all collections: 268,289,655 bytes (expansion ratio: 3.40:1)
+***
+```
+
+#### Dry Run for Decoding
+
+When running decode with the `-dryrun` flag, Padlock will:
+- Calculate the total size of input collections
+- Estimate the total decompressed output size
+
+Example output:
+```
+***
+padlock: Dry run mode - no files will be created
+padlock: Total size of input collections: 268,289,655 bytes
+padlock: Total decompressed output size:  123,456,789 bytes
+***
+```
+
+This mode is particularly useful when:
+- Working with very large datasets to estimate storage requirements
+- Testing different configuration parameters (copies, required, chunk size) to optimize space usage
+- Verifying that input collections are intact without performing a full decode operation
 
 ### Working with Large Datasets
 

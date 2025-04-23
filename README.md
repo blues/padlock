@@ -295,7 +295,7 @@ go build -o padlock cmd/padlock/main.go
 
 - **Encode:**
 
-  padlock encode <inputDir> <outputDir> -copies 5 -required 3 -format png -chunk 2097152 [-clear] [-verbose] [-files]
+  padlock encode <inputDir> <outputDir> -copies 5 -required 3 -format png -chunk 2097152 [-clear] [-verbose] [-files] [-dryrun]
 
   - `<inputDir>`: Directory containing the data to be archived and encoded.
   - `<outputDir>`: Destination directory for the generated collection subdirectories.
@@ -306,15 +306,17 @@ go build -o padlock cmd/padlock/main.go
   - `-clear`: (Optional) Clears the output directory before encoding.
   - `-verbose`: (Optional) Enables detailed trace/debug messages.
   - `-files`: (Optional) Creates individual files for each collection instead of TAR archives.
+  - `-dryrun`: (Optional) Calculate and display size information without writing output files.
 
 - **Decode:**
 
-  padlock decode <inputDir> <outputDir> [-clear] [-verbose]
+  padlock decode <inputDir> <outputDir> [-clear] [-verbose] [-dryrun]
 
   - `<inputDir>`: Root directory containing the collection subdirectories or ZIP files.
   - `<outputDir>`: Destination directory where the original data will be restored.
   - `-clear`: (Optional) Clears the output directory before decoding.
   - `-verbose`: (Optional) Enables detailed trace/debug messages.
+  - `-dryrun`: (Optional) Calculate and display size information without writing output files.
 
 **Important:**  
 Do not place the output directory within the input directory to avoid recursive processing. Also, ensure that the number of available collections meets or exceeds the required threshold; otherwise, an error will be displayed.
