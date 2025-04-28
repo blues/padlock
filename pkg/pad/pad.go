@@ -773,14 +773,32 @@ func (p *Pad) Decode(ctx context.Context, collections []io.Reader, output io.Wri
 				return fmt.Errorf("failed to find permutation index for collection %s", chunkLetters[i])
 			}
 			log.Debugf("Collection %s: XORing data from permutation %d for %s", chunkLetters[i], permIndex, permutation)
-			// XOR the data with the appropriate permutation within that chunk
+
+			// Add defensive check to ensure chunks have expected size
 			permBase := permIndex * chunkDataBytes
+			if len(chunks[i]) < permBase+chunkDataBytes {
+				log.Error(fmt.Errorf("chunk data is truncated: expected at least %d bytes, but only have %d bytes",
+					permBase+chunkDataBytes, len(chunks[i])))
+				return fmt.Errorf("chunk data truncated in collection %s - possible corruption detected", chunkLetters[i])
+			}
+
+			// Debugging information to trace chunk XOR operations
+			log.Debugf("XORing chunk data: collection=%s, permBase=%d, chunkDataBytes=%d, chunkSize=%d",
+				chunkLetters[i], permBase, chunkDataBytes, len(chunks[i]))
+
+			// Perform the XOR operation with boundary checks
 			for j := 0; j < chunkDataBytes; j++ {
+				if permBase+j >= len(chunks[i]) {
+					log.Error(fmt.Errorf("buffer overflow during XOR at index %d (max: %d)",
+						permBase+j, len(chunks[i])-1))
+					return fmt.Errorf("buffer overflow during XOR operation - corrupt or incomplete collection")
+				}
 				decodedChunk[j] = decodedChunk[j] ^ chunks[i][permBase+j]
 			}
 		}
 
 		// Write the decoded data to the output
+		log.Debugf("chunk: %d bytes of decoded data written to output", len(decodedChunk))
 		_, err := output.Write(decodedChunk)
 		if err != nil {
 			return fmt.Errorf("failed to write decoded data: %w", err)

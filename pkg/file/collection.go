@@ -558,16 +558,30 @@ func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, e
 			if ext == ".PNG" || ext == ".png" {
 				// For PNG files, extract data from the PNG
 				var buf bytes.Buffer
-				if _, err := io.Copy(&buf, cr.tarReader); err != nil {
-					log.Error(fmt.Errorf("failed to read PNG from TAR: %w", err))
+				bytesRead, err := io.Copy(&buf, cr.tarReader)
+				if err != nil {
+					log.Error(fmt.Errorf("failed to read PNG from TAR (read %d bytes): %w", bytesRead, err))
 					continue
 				}
 				
-				// Extract data from the PNG
+				log.Debugf("Successfully read %d bytes from TAR chunk %s", bytesRead, name)
+				
+				// Extract data from the PNG with enhanced error reporting
 				data, err = ExtractDataFromPNG(&buf)
 				if err != nil {
-					log.Error(fmt.Errorf("failed to extract data from PNG in TAR: %w", err))
-					continue
+					// Detailed error logging for PNG extraction failure
+					pngErr := fmt.Errorf("failed to extract data from PNG in TAR: %w", err)
+					log.Error(pngErr)
+					
+					// Save a copy of the problematic PNG for debugging if needed
+					if buf.Len() > 0 {
+						log.Debugf("PNG error analysis: PNG size=%d bytes, first 16 bytes: %x", 
+							buf.Len(), 
+							buf.Bytes()[:min(16, buf.Len())])
+					}
+					
+					// Return the error rather than just continuing, to help with debugging
+					return nil, pngErr
 				}
 			} else {
 				// For binary files, just read the content
@@ -593,4 +607,12 @@ func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, e
 			}
 		}
 	}
+}
+
+// min is a helper function to get the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

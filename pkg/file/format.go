@@ -567,36 +567,123 @@ func encodePNGWithData(w io.Writer, img image.Image, data []byte) error {
 //   - No decryption is performed (that happens later in the pad decoding process)
 //   - Fails gracefully if the PNG doesn't contain the expected chunk
 func ExtractDataFromPNG(r io.Reader) ([]byte, error) {
-	all, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("read PNG data: %w", err)
-	}
-	chunkType := []byte("rAWd")
-	chunkPos := bytes.Index(all, chunkType)
-	if chunkPos == -1 {
-		return nil, fmt.Errorf("'rAWd' chunk not found")
-	}
-	if chunkPos < 4 {
-		return nil, fmt.Errorf("invalid structure, chunk at offset <4")
-	}
-	lengthBuf := all[chunkPos-4 : chunkPos]
-	length := binary.BigEndian.Uint32(lengthBuf)
-	dataStart := chunkPos + len(chunkType)
-	dataEnd := dataStart + int(length)
-	if dataEnd > len(all) {
-		return nil, fmt.Errorf("invalid PNG chunk length, out of range")
-	}
-	extracted := all[dataStart:dataEnd]
-	crcPos := dataEnd
-	if crcPos+4 > len(all) {
-		return nil, fmt.Errorf("invalid chunk: no CRC found")
-	}
-	expectedCRC := binary.BigEndian.Uint32(all[crcPos : crcPos+4])
-	crcCalc := crc32.NewIEEE()
-	crcCalc.Write(chunkType)
-	crcCalc.Write(extracted)
-	if crcCalc.Sum32() != expectedCRC {
-		return nil, fmt.Errorf("CRC mismatch in 'rAWd' chunk")
-	}
-	return extracted, nil
+    // Get tracer from context if provided, otherwise create a new one with normal level
+    var log *trace.Tracer
+    
+    // Check if r is a traceable reader with context
+    type contextReader interface {
+        Context() context.Context
+    }
+    
+    if cr, ok := r.(contextReader); ok && cr.Context() != nil {
+        // Use context from reader
+        log = trace.FromContext(cr.Context()).WithPrefix("PNG-EXTRACTOR")
+    } else {
+        // Create a tracer with normal level to avoid verbose output unless verbose mode is on
+        log = trace.NewTracer("PNG-EXTRACTOR", trace.LogLevelNormal)
+    }
+
+    // Use IsVerbose instead of a level check
+    if log.IsVerbose() {
+        log.Debugf("Reading PNG data from source...")
+    }
+    
+    all, err := io.ReadAll(r)
+    if err != nil {
+        log.Error(fmt.Errorf("failed to read PNG data: %w", err))
+        return nil, fmt.Errorf("read PNG data: %w", err)
+    }
+    
+    if log.IsVerbose() {
+        log.Debugf("Read %d bytes of PNG data", len(all))
+    }
+    
+    // Basic PNG signature validation
+    if len(all) < 8 || !bytes.Equal(all[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+        log.Error(fmt.Errorf("invalid PNG signature"))
+        return nil, fmt.Errorf("invalid PNG signature")
+    }
+    
+    // Look for our custom chunk
+    chunkType := []byte("rAWd")
+    chunkPos := bytes.Index(all, chunkType)
+    if chunkPos == -1 {
+        log.Error(fmt.Errorf("'rAWd' chunk not found in %d bytes of data", len(all)))
+        return nil, fmt.Errorf("'rAWd' chunk not found")
+    }
+    
+    if log.IsVerbose() {
+        log.Debugf("Found 'rAWd' chunk at position %d", chunkPos)
+    }
+    
+    if chunkPos < 4 {
+        log.Error(fmt.Errorf("invalid structure, chunk at offset %d (less than 4)", chunkPos))
+        return nil, fmt.Errorf("invalid structure, chunk at offset <4")
+    }
+    
+    // Extract and validate chunk length
+    lengthBuf := all[chunkPos-4 : chunkPos]
+    length := binary.BigEndian.Uint32(lengthBuf)
+    
+    if log.IsVerbose() {
+        log.Debugf("Chunk length from header: %d bytes", length)
+    }
+    
+    // Calculate positions for data extraction
+    dataStart := chunkPos + len(chunkType)
+    dataEnd := dataStart + int(length)
+    
+    // Validate data boundaries
+    if dataEnd > len(all) {
+        log.Error(fmt.Errorf("invalid PNG chunk length %d, exceeds available data (%d bytes)", length, len(all) - dataStart))
+        return nil, fmt.Errorf("invalid PNG chunk length %d, exceeds available data", length)
+    }
+    
+    // Extract the actual data
+    extracted := all[dataStart:dataEnd]
+    
+    if log.IsVerbose() {
+        log.Debugf("Extracted %d bytes of chunk data", len(extracted))
+    }
+    
+    // Validate CRC
+    crcPos := dataEnd
+    if crcPos+4 > len(all) {
+        log.Error(fmt.Errorf("invalid chunk: no CRC found (needed at position %d, but data only %d bytes)", crcPos+4, len(all)))
+        return nil, fmt.Errorf("invalid chunk: no CRC found")
+    }
+    
+    expectedCRC := binary.BigEndian.Uint32(all[crcPos : crcPos+4])
+    
+    crcCalc := crc32.NewIEEE()
+    crcCalc.Write(chunkType)
+    crcCalc.Write(extracted)
+    calculatedCRC := crcCalc.Sum32()
+    
+    if log.IsVerbose() {
+        log.Debugf("Expected CRC from PNG: 0x%08x", expectedCRC)
+        log.Debugf("Calculated CRC: 0x%08x", calculatedCRC)
+    }
+    
+    if calculatedCRC != expectedCRC {
+        // Detailed error for CRC mismatch showing both values
+        log.Error(fmt.Errorf("CRC mismatch in 'rAWd' chunk: expected 0x%08x, calculated 0x%08x", expectedCRC, calculatedCRC))
+        
+        // Additional diagnostics for corruption analysis
+        if log.IsVerbose() {
+            if len(extracted) > 20 {
+                log.Debugf("Data prefix (first 20 bytes): %x", extracted[:20])
+            } else if len(extracted) > 0 {
+                log.Debugf("Data (all %d bytes): %x", len(extracted), extracted)
+            }
+        }
+        
+        return nil, fmt.Errorf("CRC mismatch in 'rAWd' chunk")
+    }
+    
+    if log.IsVerbose() {
+        log.Debugf("CRC verified successfully, returning %d bytes of data", len(extracted))
+    }
+    
+    return extracted, nil
 }

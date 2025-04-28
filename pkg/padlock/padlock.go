@@ -38,6 +38,7 @@
 package padlock
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -59,16 +60,16 @@ import (
 type SizeTracker struct {
 	// InputSize is the total size of the input data in bytes
 	InputSize int64
-	
+
 	// CompressedInputSize is the size of the input data after compression
 	CompressedInputSize int64
-	
+
 	// EncodeCollectionsTotalSize is the sum of sizes of all collections
 	EncodeCollectionsTotalSize int64
-	
+
 	// EncodeCollectionsSizes contains the size of each individual collection
 	EncodeCollectionsSizes map[string]int64
-	
+
 	// DecodeOutputSize is the size of the fully expanded output data
 	DecodeOutputSize int64
 }
@@ -79,7 +80,7 @@ func FormatByteSize(bytes int64) string {
 	if bytes < 0 {
 		return "-" + FormatByteSize(-bytes)
 	}
-	
+
 	// Format number with commas
 	str := fmt.Sprintf("%d", bytes)
 	result := ""
@@ -97,10 +98,10 @@ func FormatByteSize(bytes int64) string {
 type SizeTrackingWriter struct {
 	// Size tracks the total bytes "written"
 	Size int64
-	
+
 	// CollectionName tracks which collection this writer is for
 	CollectionName string
-	
+
 	// SizeTracker reference to update the central size tracker
 	Tracker *SizeTracker
 }
@@ -119,7 +120,7 @@ func NewSizeTrackingWriter(collectionName string, tracker *SizeTracker) *SizeTra
 func (w *SizeTrackingWriter) Write(p []byte) (n int, err error) {
 	size := len(p)
 	w.Size += int64(size)
-	
+
 	// Update the collection's size in the tracker if we're tracking a collection
 	if w.CollectionName != "" && w.Tracker != nil {
 		if w.Tracker.EncodeCollectionsSizes == nil {
@@ -128,7 +129,7 @@ func (w *SizeTrackingWriter) Write(p []byte) (n int, err error) {
 		w.Tracker.EncodeCollectionsSizes[w.CollectionName] += int64(size)
 		w.Tracker.EncodeCollectionsTotalSize += int64(size)
 	}
-	
+
 	return size, nil
 }
 
@@ -146,8 +147,8 @@ type SizeTrackingWriteCloser interface {
 // SizeTrackingReader wraps an io.Reader to count bytes as they're read.
 // This helps track the size of input/output streams during the size-only operation.
 type SizeTrackingReader struct {
-	Reader io.Reader
-	Size   int64
+	Reader  io.Reader
+	Size    int64
 	Tracker *SizeTracker
 	IsInput bool // Whether this is tracking input (true) or output (false)
 }
@@ -167,7 +168,7 @@ func NewSizeTrackingReader(reader io.Reader, tracker *SizeTracker, isInput bool)
 func (r *SizeTrackingReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	r.Size += int64(n)
-	
+
 	// Update the appropriate tracker field based on whether this is input or output
 	if r.Tracker != nil {
 		if r.IsInput {
@@ -176,7 +177,7 @@ func (r *SizeTrackingReader) Read(p []byte) (int, error) {
 			r.Tracker.DecodeOutputSize = r.Size
 		}
 	}
-	
+
 	return n, err
 }
 
@@ -198,21 +199,21 @@ type SizeTrackingReadCloser interface {
 // to accurately measure the size of compressed data during a dry run.
 func compressForDryRun(ctx context.Context, inputStream io.Reader, sizeTracker *SizeTracker) (io.Reader, error) {
 	log := trace.FromContext(ctx).WithPrefix("padlock")
-	
+
 	// Read all the uncompressed data
 	uncompressedData, err := io.ReadAll(inputStream)
 	if err != nil {
 		log.Error(fmt.Errorf("failed to read input data: %w", err))
 		return nil, err
 	}
-	
+
 	// Store the uncompressed size
 	sizeTracker.InputSize = int64(len(uncompressedData))
 	log.Debugf("Uncompressed input size: %d bytes", sizeTracker.InputSize)
-	
+
 	// Create a buffer for compressed data
 	var compressedBuf bytes.Buffer
-	
+
 	// Compress the data
 	gzw := gzip.NewWriter(&compressedBuf)
 	_, err = gzw.Write(uncompressedData)
@@ -220,17 +221,17 @@ func compressForDryRun(ctx context.Context, inputStream io.Reader, sizeTracker *
 		log.Error(fmt.Errorf("failed to compress data: %w", err))
 		return nil, err
 	}
-	
+
 	// Close the gzip writer to flush any remaining data
 	if err := gzw.Close(); err != nil {
 		log.Error(fmt.Errorf("failed to close gzip writer: %w", err))
 		return nil, err
 	}
-	
+
 	// Store the compressed size
 	sizeTracker.CompressedInputSize = int64(compressedBuf.Len())
 	log.Debugf("Compressed input size: %d bytes", sizeTracker.CompressedInputSize)
-	
+
 	// Return a reader for the compressed data
 	return bytes.NewReader(compressedBuf.Bytes()), nil
 }
@@ -319,7 +320,7 @@ type DecodeConfig struct {
 func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	log := trace.FromContext(ctx).WithPrefix("padlock")
 	start := time.Now()
-	
+
 	// Log differently depending on whether using single or multiple output directories
 	if len(cfg.OutputDirs) <= 1 {
 		log.Infof("Starting encode: InputDir=%s OutputDir=%s", cfg.InputDir, cfg.OutputDir)
@@ -364,31 +365,31 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		log.Error(fmt.Errorf("failed to create pad instance: %w", err))
 		return err
 	}
-	
+
 	// Initialize size tracker if we're in size-only mode
 	var sizeTracker *SizeTracker
 	if cfg.SizeOnly {
 		sizeTracker = &SizeTracker{
-			InputSize:                 0,
-			CompressedInputSize:       0,
+			InputSize:                  0,
+			CompressedInputSize:        0,
 			EncodeCollectionsTotalSize: 0,
-			EncodeCollectionsSizes:    make(map[string]int64),
-			DecodeOutputSize:          0,
+			EncodeCollectionsSizes:     make(map[string]int64),
+			DecodeOutputSize:           0,
 		}
 		p.SizeTracker = sizeTracker
 	}
 
 	// Create collections based on the configuration
 	var collections []file.Collection
-	
+
 	// In dry run mode, we don't need to actually create collection directories
 	if cfg.SizeOnly {
 		// Just set up virtual collections for dry run
 		collections = make([]file.Collection, len(p.Collections))
 		for i, collName := range p.Collections {
 			collections[i] = file.Collection{
-				Name: collName,
-				Path: "dryrun-" + collName, // Use a placeholder path
+				Name:   collName,
+				Path:   "dryrun-" + collName, // Use a placeholder path
 				Format: cfg.Format,
 			}
 			log.Debugf("Created virtual collection %d for dry run: %s", i+1, collName)
@@ -399,15 +400,15 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 			return fmt.Errorf("number of output directories (%d) does not match number of collections (%d)",
 				len(cfg.OutputDirs), len(p.Collections))
 		}
-		
+
 		// Create collections in individual directories
 		collections = make([]file.Collection, len(p.Collections))
 		for i, collName := range p.Collections {
 			// For multiple output dirs, we use the actual directory as the collection directory
 			// (not a subdirectory like in the traditional approach)
 			collections[i] = file.Collection{
-				Name: collName,
-				Path: cfg.OutputDirs[i],
+				Name:   collName,
+				Path:   cfg.OutputDirs[i],
 				Format: cfg.Format,
 			}
 			log.Debugf("Created collection %d: %s at %s", i+1, collName, cfg.OutputDirs[i])
@@ -419,7 +420,7 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Set format for all collections
 		for i := range collections {
 			collections[i].Format = cfg.Format
@@ -430,8 +431,8 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		collections = make([]file.Collection, len(p.Collections))
 		for i, collName := range p.Collections {
 			collections[i] = file.Collection{
-				Name: collName,
-				Path: filepath.Join(cfg.OutputDir, collName),
+				Name:   collName,
+				Path:   filepath.Join(cfg.OutputDir, collName),
 				Format: cfg.Format,
 			}
 			log.Debugf("Created virtual collection %d: %s at %s", i+1, collName, collections[i].Path)
@@ -457,7 +458,7 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 	var inputStream io.Reader = tarStream
 	if cfg.Compression == CompressionGzip {
 		log.Debugf("Adding gzip compression to stream")
-		
+
 		// If we're in size-only mode, use in-memory compression to track sizes accurately
 		if cfg.SizeOnly && sizeTracker != nil {
 			var err error
@@ -481,11 +482,11 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		if cfg.SizeOnly && sizeTracker != nil {
 			return NewSizeTrackingWriter(collectionName, sizeTracker), nil
 		}
-	
+
 		// Find the collection path for the given collection name
 		var collPath string
 		var found bool
-		
+
 		for _, c := range collections {
 			if c.Name == collectionName {
 				collPath = c.Path
@@ -497,12 +498,12 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		if !found || collPath == "" {
 			return nil, fmt.Errorf("collection not found: %s", collectionName)
 		}
-		
+
 		// If archive collections is enabled, create TarChunkWriter
 		if cfg.ArchiveCollections {
 			// Handle TAR path differently based on single vs multiple output dirs
 			var tarPath string
-			
+
 			if len(cfg.OutputDirs) > 1 {
 				// For multiple output directories, put the TAR inside the directory
 				tarPath = filepath.Join(collPath, collectionName+".tar")
@@ -513,21 +514,21 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 					tarPath = tarPath + ".tar"
 				}
 			}
-			
+
 			log.Debugf("Preparing to write to TAR file at: %s", tarPath)
-			
+
 			// Create the TarChunkWriter for this chunk if it doesn't exist yet
 			tarWriter, err := file.NewTarChunkWriter(ctx, tarPath, collectionName, cfg.Format)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create tar chunk writer: %w", err)
 			}
-			
+
 			// Set the chunk number for this write operation
 			tarWriter.ChunkNum = chunkNumber
-			
+
 			return tarWriter, nil
 		}
-		
+
 		// Otherwise use the standard NamedChunkWriter for directory output
 		return &file.NamedChunkWriter{
 			Ctx:       ctx,
@@ -570,7 +571,7 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 			return err
 		}
 		log.Debugf("All TAR writers finalized successfully")
-		
+
 		// For single output directory, we might have empty directories to clean up
 		// but for multiple output directories, we should leave directories alone
 		if len(cfg.OutputDirs) <= 1 {
@@ -616,19 +617,45 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 		}
 	}
 
+	// Perform verification for PNG collections if not in dry run mode
+	if !cfg.SizeOnly && cfg.Format == FormatPNG {
+		log.Infof("Starting verification pass to ensure PNG data integrity...")
+
+		// If we're using TAR archives, the collection paths need to be updated to point to the TAR files
+		if cfg.ArchiveCollections {
+			for i := range collections {
+				if !strings.HasSuffix(collections[i].Path, ".tar") {
+					// For multiple output directories, the TAR files are named differently (collection name inside the dir)
+					if len(cfg.OutputDirs) > 1 {
+						collections[i].Path = filepath.Join(collections[i].Path, collections[i].Name+".tar")
+					} else {
+						collections[i].Path = collections[i].Path + ".tar"
+					}
+				}
+			}
+		}
+
+		if err := VerifyCollectionIntegrity(ctx, collections, cfg.Format); err != nil {
+			log.Error(fmt.Errorf("verification completed with errors: %w", err))
+			// We continue despite errors - we want to return the encoded data anyway
+		} else {
+			log.Infof("Verification completed successfully - all PNG files passed integrity checks")
+		}
+	}
+
 	// Log completion information including elapsed time
 	elapsed := time.Since(start)
-	
+
 	// Display dry run information if in size-only mode
 	if cfg.SizeOnly && sizeTracker != nil {
 		// Output the size report with asterisk lines at beginning and end
 		log.Infof("*** DRY RUN SIZE REPORT ***")
-		
+
 		log.Infof("Original input size:              %s bytes", FormatByteSize(sizeTracker.InputSize))
-		
+
 		if cfg.Compression == CompressionGzip && sizeTracker.CompressedInputSize > 0 {
 			log.Infof("Compressed input size:            %s bytes", FormatByteSize(sizeTracker.CompressedInputSize))
-			
+
 			// Calculate compression ratio
 			compressionRatio := 0.0
 			if sizeTracker.InputSize > 0 {
@@ -636,17 +663,17 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 			}
 			log.Infof("Compression ratio:                %.2f%%", compressionRatio)
 		}
-		
+
 		if sizeTracker.EncodeCollectionsTotalSize > 0 {
 			// Calculate each collection size as an integer (all collections are same size)
 			eachCollectionSize := int64(0)
 			if len(sizeTracker.EncodeCollectionsSizes) > 0 {
 				eachCollectionSize = sizeTracker.EncodeCollectionsTotalSize / int64(len(sizeTracker.EncodeCollectionsSizes))
 			}
-			
+
 			log.Infof("Each collection size:             %s bytes", FormatByteSize(eachCollectionSize))
 			log.Infof("Total size of all collections:    %s bytes", FormatByteSize(sizeTracker.EncodeCollectionsTotalSize))
-			
+
 			// Calculate expansion ratio (total collections size / original input size)
 			expansionRatio := 0.0
 			if sizeTracker.InputSize > 0 {
@@ -654,19 +681,19 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 			}
 			log.Infof("Expansion ratio:                  %.2f%%", expansionRatio)
 		}
-		
+
 		// End the report with an asterisk line
 		log.Infof("***")
 	}
-	
+
 	// Log differently depending on whether using single or multiple output directories
 	if len(cfg.OutputDirs) <= 1 {
 		log.Infof("Encode complete (%s) -copies %d -required %d -format %s", elapsed, cfg.N, cfg.K, cfg.Format)
 	} else {
-		log.Infof("Encode complete (%s) with %d output directories -required %d -format %s", 
+		log.Infof("Encode complete (%s) with %d output directories -required %d -format %s",
 			elapsed, len(cfg.OutputDirs), cfg.K, cfg.Format)
 	}
-	
+
 	return nil
 }
 
@@ -674,14 +701,14 @@ func EncodeDirectory(ctx context.Context, cfg EncodeConfig) error {
 func isValidCollectionDir(ctx context.Context, dirPath string) bool {
 	log := trace.FromContext(ctx).WithPrefix("padlock")
 	log.Debugf("Checking if %s is a valid collection directory", dirPath)
-	
+
 	// Try to determine collection format
 	format, err := file.DetermineCollectionFormat(dirPath)
 	if err != nil {
 		log.Debugf("%s is not a valid collection directory: %v", dirPath, err)
 		return false
 	}
-	
+
 	log.Debugf("%s appears to be a valid collection directory with format %s", dirPath, format)
 	return true
 }
@@ -689,21 +716,21 @@ func isValidCollectionDir(ctx context.Context, dirPath string) bool {
 // determineCollectionNameFromContent tries to deduce the collection name by examining files
 func determineCollectionNameFromContent(ctx context.Context, dirPath string) (string, error) {
 	log := trace.FromContext(ctx).WithPrefix("padlock")
-	
+
 	// Read the directory
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
-	
+
 	// Look for files with pattern like "IMG3A5_0001.PNG" or "3A5_0001.bin"
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		name := entry.Name()
-		
+
 		// Check for PNG files
 		if strings.HasSuffix(strings.ToUpper(name), ".PNG") && strings.HasPrefix(name, "IMG") {
 			// Extract the collection name after "IMG" and before "_"
@@ -713,7 +740,7 @@ func determineCollectionNameFromContent(ctx context.Context, dirPath string) (st
 				return parts[0], nil
 			}
 		}
-		
+
 		// Check for bin files
 		if strings.HasSuffix(name, ".bin") {
 			// Extract the collection name before "_"
@@ -724,7 +751,7 @@ func determineCollectionNameFromContent(ctx context.Context, dirPath string) (st
 			}
 		}
 	}
-	
+
 	return "", fmt.Errorf("could not determine collection name from directory content")
 }
 
@@ -753,7 +780,7 @@ func determineCollectionNameFromContent(ctx context.Context, dirPath string) (st
 func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	log := trace.FromContext(ctx).WithPrefix("padlock")
 	start := time.Now()
-	
+
 	// Log differently depending on whether using single or multiple input directories
 	if len(cfg.InputDirs) <= 1 {
 		log.Infof("Starting decode: InputDir=%s OutputDir=%s", cfg.InputDir, cfg.OutputDir)
@@ -777,7 +804,7 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	// Variable to hold all collected collections and a tempDir if needed
 	var allCollections []file.Collection
 	var collTempDir string
-	
+
 	// Handle single input dir or multiple input dirs
 	if len(cfg.InputDirs) <= 1 {
 		// Traditional approach - single input directory containing multiple collections
@@ -785,14 +812,14 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		if err := file.ValidateInputDirectory(ctx, cfg.InputDir); err != nil {
 			return err
 		}
-		
+
 		// Find collections (directories or zips) in the input directory
 		// This identifies all available collections, extracting ZIP files if necessary
 		collections, tempDir, err := file.FindCollections(ctx, cfg.InputDir)
 		if err != nil {
 			return err
 		}
-		
+
 		// Use the results
 		allCollections = collections
 		collTempDir = tempDir
@@ -803,7 +830,7 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 			if err := file.ValidateInputDirectory(ctx, inputDir); err != nil {
 				return err
 			}
-			
+
 			// First check if this directory contains a collection directly
 			// (it might be a directory containing a collection like '3A5')
 			if isValidCollectionDir(ctx, inputDir) {
@@ -813,7 +840,7 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 					log.Infof("Could not determine collection format for %s, skipping: %v", inputDir, err)
 					continue
 				}
-				
+
 				collName := filepath.Base(inputDir)
 				if !file.IsCollectionName(collName) {
 					// If the directory name is not a valid collection name,
@@ -824,7 +851,7 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 						continue
 					}
 				}
-				
+
 				collection := file.Collection{
 					Name:   collName,
 					Path:   inputDir,
@@ -839,15 +866,15 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 					log.Infof("Failed to find collections in %s: %v", inputDir, err)
 					continue
 				}
-				
+
 				// Add these collections to our master list
 				allCollections = append(allCollections, collections...)
-				
+
 				// Remember the tempDir for cleanup if it exists
 				if tempDir != "" && collTempDir == "" {
 					collTempDir = tempDir
 				}
-				
+
 				log.Debugf("Found %d collections in directory %s", len(collections), inputDir)
 			}
 		}
@@ -900,16 +927,16 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		log.Error(fmt.Errorf("failed to create pad instance: %w", err))
 		return err
 	}
-	
+
 	// Initialize size tracker if we're in size-only mode
 	var sizeTracker *SizeTracker
 	if cfg.SizeOnly {
 		sizeTracker = &SizeTracker{
-			InputSize:                 0,
-			CompressedInputSize:       0,
+			InputSize:                  0,
+			CompressedInputSize:        0,
 			EncodeCollectionsTotalSize: 0,
-			EncodeCollectionsSizes:    make(map[string]int64),
-			DecodeOutputSize:          0,
+			EncodeCollectionsSizes:     make(map[string]int64),
+			DecodeOutputSize:           0,
 		}
 		p.SizeTracker = sizeTracker
 	}
@@ -948,15 +975,15 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		// Deserialize the tar stream to the output directory
 		// This reconstructs the original directory structure and files
 		log.Debugf("Deserializing to output directory: %s", cfg.OutputDir)
-		
+
 		// If we're in dry run mode, wrap the output stream with a size tracker
 		// and just read through the data without writing to disk
 		if cfg.SizeOnly && sizeTracker != nil {
 			log.Debugf("Performing dry run size tracking without writing files")
-			
+
 			// Wrap the output stream with our size tracker
 			trackingReader := NewSizeTrackingReader(outputStream, sizeTracker, false) // false = output stream
-			
+
 			// Just read through the entire stream to count bytes, but don't write to disk
 			_, err := io.Copy(io.Discard, trackingReader)
 			if err != nil {
@@ -992,8 +1019,22 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 	// The result is written to the pipe writer (pw)
 	err = p.Decode(ctx, readers, pw)
 	if err != nil {
-		log.Error(fmt.Errorf("decoding failed: %w", err))
-		return fmt.Errorf("decoding failed: %w", err)
+		// Enhanced error handling for the unexpected EOF error
+		if err == io.ErrUnexpectedEOF || err.Error() == "unexpected EOF" {
+			log.Error(fmt.Errorf("decode failed with unexpected EOF - this is typically caused by corrupt PNG files or incomplete collections: %w", err))
+
+			// Provide more detailed troubleshooting information
+			log.Infof("Troubleshooting suggestions:")
+			log.Infof("1. Ensure all collection files are intact and not corrupted")
+			log.Infof("2. Verify you have at least K complete collections out of the original N")
+			log.Infof("3. Check if all chunks in the collections have matching chunk numbers")
+			log.Infof("4. Try using a different combination of K collections if more are available")
+
+			return fmt.Errorf("decode failed: unexpected EOF - one or more collections may be corrupt or incomplete: %w", err)
+		} else {
+			log.Error(fmt.Errorf("decoding failed: %w", err))
+			return fmt.Errorf("decoding failed: %w", err)
+		}
 	}
 
 	// Close the pipe writer to signal the end of data to the deserialization goroutine
@@ -1026,15 +1067,15 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 
 	// Log completion information including elapsed time
 	elapsed := time.Since(start)
-	
+
 	// Display dry run information if in size-only mode
 	if cfg.SizeOnly && sizeTracker != nil {
 		// Output the size report with asterisk lines at beginning and end
 		log.Infof("*** DRY RUN SIZE REPORT ***")
-		
+
 		// Calculate and report total size of input collections
 		totalInputSize := int64(0)
-		
+
 		// Calculate total collection size by checking actual files
 		for _, inputDir := range cfg.InputDirs {
 			// Check if it's a directory or a file
@@ -1060,18 +1101,208 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 				}
 			}
 		}
-		
+
 		log.Infof("Total size of input collections:  %s bytes", FormatByteSize(totalInputSize))
-		
+
 		// Report output size if available
 		if sizeTracker.DecodeOutputSize > 0 {
 			log.Infof("Decompressed output size:        %s bytes", FormatByteSize(sizeTracker.DecodeOutputSize))
 		}
-		
+
 		// End the report with an asterisk line
 		log.Infof("***")
 	}
-	
+
 	log.Infof("Decode complete (%s)", elapsed)
 	return nil
+}
+
+// VerifyCollectionIntegrity performs a verification pass on all collections to ensure data integrity
+// For PNG collections, this verifies each chunk's CRC to detect any corruption
+func VerifyCollectionIntegrity(ctx context.Context, collections []file.Collection, format Format) error {
+	log := trace.FromContext(ctx).WithPrefix("verify")
+
+	// If not PNG format, verification is not needed
+	if format != FormatPNG {
+		log.Debugf("Verification only needed for PNG format, skipping for %s format", format)
+		return nil
+	}
+
+	// Count of chunks verified across all collections
+	totalFiles := 0
+	totalVerified := 0
+	totalErrors := 0
+	dotPrinted := false
+
+	// Process each collection
+	for i, coll := range collections {
+		collLog := log.WithPrefix(fmt.Sprintf("verify-%s", coll.Name))
+		collLog.Infof("verifying collection %s (%d of %d)...", coll.Name, i+1, len(collections))
+
+		// Collection-level counts
+		collFiles := 0
+		collVerified := 0
+		collErrors := 0
+
+		// Handle different storage approaches
+		if strings.HasSuffix(coll.Path, ".tar") {
+			// For TAR files
+			collLog.Debugf("Collection is in TAR format, verifying: %s", coll.Path)
+
+			// Open the TAR file
+			tarFile, err := os.Open(coll.Path)
+			if err != nil {
+				collLog.Error(fmt.Errorf("failed to open TAR file: %w", err))
+				continue
+			}
+			defer tarFile.Close()
+
+			// Create TAR reader
+			tr := tar.NewReader(tarFile)
+
+			// Process each entry
+			for {
+				header, err := tr.Next()
+				if err == io.EOF {
+					break // End of archive
+				}
+				if err != nil {
+					collLog.Error(fmt.Errorf("error reading TAR header: %w", err))
+					totalErrors++
+					collErrors++
+					continue
+				}
+
+				// Skip if not a PNG file
+				if !strings.HasSuffix(strings.ToUpper(header.Name), ".PNG") {
+					continue
+				}
+
+				collFiles++
+				totalFiles++
+
+				// Get the chunk number for better reporting
+				chunkNum := "?"
+				parts := strings.Split(strings.TrimSuffix(header.Name, ".PNG"), "_")
+				if len(parts) >= 2 {
+					chunkNum = parts[1]
+				}
+
+				// Read PNG data
+				var buf bytes.Buffer
+				if _, err := io.Copy(&buf, tr); err != nil {
+					collLog.Error(fmt.Errorf("failed to read PNG data from TAR (chunk %s): %w", chunkNum, err))
+					totalErrors++
+					collErrors++
+					continue
+				}
+
+				// Try to extract data which verifies CRC
+				_, err = file.ExtractDataFromPNG(&buf)
+				if err != nil {
+					collLog.Error(fmt.Errorf("PNG verification failed for chunk %s: %w", chunkNum, err))
+					totalErrors++
+					collErrors++
+					continue
+				}
+
+				// Count successful verification
+				collVerified++
+				totalVerified++
+
+				// Progress indicator (using dots for conciseness)
+				if collVerified%20 == 0 {
+					dotPrinted = true
+					fmt.Printf(".")
+				}
+			}
+
+		} else {
+			// For directory-based collections
+			collLog.Debugf("Collection is directory-based, verifying: %s", coll.Path)
+
+			// Find all PNG files
+			pngPattern := filepath.Join(coll.Path, "IMG*.PNG")
+			pngFiles, err := filepath.Glob(pngPattern)
+			if err != nil {
+				collLog.Error(fmt.Errorf("failed to find PNG files: %w", err))
+				continue
+			}
+
+			collFiles = len(pngFiles)
+			totalFiles += collFiles
+
+			// Check each file
+			for _, filePath := range pngFiles {
+				// Get filename for reporting
+				fileName := filepath.Base(filePath)
+
+				// Open the file
+				f, err := os.Open(filePath)
+				if err != nil {
+					collLog.Error(fmt.Errorf("failed to open PNG file %s: %w", fileName, err))
+					totalErrors++
+					collErrors++
+					continue
+				}
+
+				// Read the file into memory
+				fileData, err := io.ReadAll(f)
+				f.Close() // Close immediately after reading
+
+				if err != nil {
+					collLog.Error(fmt.Errorf("failed to read PNG file %s: %w", fileName, err))
+					totalErrors++
+					collErrors++
+					continue
+				}
+
+				// Try to extract data which verifies CRC
+				buf := bytes.NewBuffer(fileData)
+				_, err = file.ExtractDataFromPNG(buf)
+
+				if err != nil {
+					collLog.Error(fmt.Errorf("PNG verification failed for %s: %w", fileName, err))
+					totalErrors++
+					collErrors++
+					continue
+				}
+
+				// Count successful verification
+				collVerified++
+				totalVerified++
+
+				// Progress indicator (using dots for conciseness)
+				if collVerified%20 == 0 {
+					dotPrinted = true
+					fmt.Printf(".")
+				}
+
+			}
+		}
+
+		// Report collection results
+		if dotPrinted {
+			fmt.Printf("\n") // Newline after progress dots
+		}
+		if collErrors > 0 {
+			collLog.Infof("Verified %d/%d files - found %d errors", collVerified, collFiles, collErrors)
+		} else if collVerified > 0 {
+			collLog.Infof("All %d files verified successfully", collVerified)
+		} else {
+			collLog.Infof("No files found to verify")
+		}
+	}
+
+	// Report overall results
+	if totalErrors > 0 {
+		log.Infof("Verification complete: %d/%d files verified, %d errors detected", totalVerified, totalFiles, totalErrors)
+		return fmt.Errorf("PNG verification found %d integrity errors in %d files", totalErrors, totalFiles)
+	} else if totalVerified > 0 {
+		log.Infof("Verification complete: All %d files passed integrity checks", totalVerified)
+		return nil
+	} else {
+		log.Infof("Verification complete: No files were found to verify")
+		return nil
+	}
 }

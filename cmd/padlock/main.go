@@ -169,10 +169,17 @@ func handleEncode() {
 	if *nVal < 2 || *nVal > 26 {
 		log.Fatalf("Error: Number of collections (-copies) must be between 2 and 26, got %d", *nVal)
 	}
-	if *reqVal < 2 {
+	
+	// If -required not explicitly set on command line, default to same as copies when using multiple output dirs
+	if fs.Lookup("required").Value.String() == "2" && len(outputDirs) > 1 {
+		// Only update if we have multiple output directories and -required wasn't specified
+		*reqVal = *nVal
+		log.Printf("Setting -required to %d to match number of collections", *reqVal)
+	} else if *reqVal < 2 {
 		log.Printf("Warning: -required value %d is too small, using minimum value of 2", *reqVal)
 		*reqVal = 2
 	}
+	
 	if *reqVal > *nVal {
 		log.Fatalf("Error: -required value %d cannot be greater than number of collections (-copies) %d", *reqVal, *nVal)
 	}
