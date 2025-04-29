@@ -108,7 +108,7 @@ func TestTarCollections(t *testing.T) {
 	tarPaths := make([]string, len(collections))
 	tarCalled := make([]bool, len(collections))
 	cleanupCalled := make([]bool, len(collections))
-	
+
 	// Mock implementations
 	TarCollection = func(ctx context.Context, collPath string) (string, error) {
 		for i, coll := range collections {
@@ -120,7 +120,7 @@ func TestTarCollections(t *testing.T) {
 		}
 		return "", nil
 	}
-	
+
 	CleanupCollectionDirectory = func(ctx context.Context, collPath string) error {
 		for i, coll := range collections {
 			if collPath == coll.Path {
@@ -159,31 +159,31 @@ func TestTarCollections(t *testing.T) {
 			t.Errorf("CleanupCollectionDirectory was not called for collection %s", coll.Name)
 		}
 	}
-	
+
 	// Test backward compatibility - ZipCollections should call TarCollections
 	TarCollection = func(ctx context.Context, collPath string) (string, error) {
 		for i, coll := range collections {
 			if collPath == coll.Path {
 				tarPaths[i] = collPath + ".tar" // Change to make sure we can detect the call
-				tarCalled[i] = false // Reset to track new calls
+				tarCalled[i] = false            // Reset to track new calls
 				return tarPaths[i], nil
 			}
 		}
 		return "", nil
 	}
-	
+
 	// Reset tracking arrays
 	for i := range tarCalled {
 		tarCalled[i] = false
 		cleanupCalled[i] = false
 	}
-	
+
 	// Call ZipCollections (which should now call TarCollections)
 	resultPaths, err = ZipCollections(ctx, collections)
 	if err != nil {
 		t.Fatalf("ZipCollections compatibility function failed: %v", err)
 	}
-	
+
 	// Verify all collections were processed by the compatibility wrapper
 	for i, path := range resultPaths {
 		if path != tarPaths[i] {

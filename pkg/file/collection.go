@@ -81,7 +81,7 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 	// Gather collections from directories and tar files
 	var collections []Collection
 	directTarCollections := make(map[string]bool) // Used to track TAR files processed directly
-	var tempDir string // Temporary directory for TAR extraction
+	var tempDir string                            // Temporary directory for TAR extraction
 
 	// First, gather all collection directories
 	log.Debugf("Checking for collection directories")
@@ -117,25 +117,25 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".tar") {
 			tarPath := filepath.Join(inputDir, entry.Name())
 			log.Debugf("Found collection tar file: %s", tarPath)
-			
+
 			// Try to determine collection name from the TAR filename
 			// TAR files are usually named after the collection, like "3A5.tar"
 			baseName := strings.TrimSuffix(entry.Name(), ".tar")
-			
+
 			// Check if it looks like a valid collection name
 			if IsCollectionName(baseName) {
 				log.Debugf("Using direct TAR access for collection %s", baseName)
-				
+
 				// Try to open the TAR file to check for contents
 				file, err := os.Open(tarPath)
 				if err != nil {
 					log.Error(fmt.Errorf("failed to open tar file %s: %w", tarPath, err))
 					continue
 				}
-				
+
 				// Create tar reader directly without gzip decompression
 				tarReader := tar.NewReader(file)
-				
+
 				// Determine format by examining TAR entries
 				format := Format("")
 				for {
@@ -147,7 +147,7 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 						log.Error(fmt.Errorf("error reading tar header: %w", err))
 						break
 					}
-					
+
 					// Check file extension to determine format
 					name := header.Name
 					if strings.HasSuffix(strings.ToUpper(name), ".PNG") {
@@ -158,29 +158,29 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 						break
 					}
 				}
-				
+
 				// Close reader
 				file.Close()
-				
+
 				if format == "" {
 					log.Error(fmt.Errorf("could not determine format for tar file %s", tarPath))
 					continue
 				}
-				
+
 				// Add the collection for direct access
 				collections = append(collections, Collection{
 					Name:   baseName,
 					Path:   tarPath,
 					Format: format,
 				})
-				
+
 				directTarCollections[tarPath] = true
 				log.Debugf("Added TAR-based collection %s with format %s for direct access", baseName, format)
 			} else {
 				log.Debugf("TAR filename doesn't match collection name pattern: %s", entry.Name())
 				// For TARs without collection names in their filename, we'd need a way to examine
 				// their contents to determine collection name. For now, handle them the traditional way.
-				
+
 				// Create a temporary directory for extraction if needed
 				if tempDir == "" {
 					var err error
@@ -191,14 +191,14 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 					}
 					log.Debugf("Created temporary directory for TAR extraction: %s", tempDir)
 				}
-				
+
 				// Extract the TAR file to the temporary directory
 				extractedDir, err := ExtractTarCollection(ctx, tarPath, tempDir)
 				if err != nil {
 					log.Error(fmt.Errorf("failed to extract TAR file %s: %w", tarPath, err))
 					continue
 				}
-				
+
 				// Try to determine the collection name from the extracted directory
 				collName := filepath.Base(extractedDir)
 				if !IsCollectionName(collName) {
@@ -210,21 +210,21 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 						continue
 					}
 				}
-				
+
 				// Determine the format
 				format, err := DetermineCollectionFormat(extractedDir)
 				if err != nil {
 					log.Error(fmt.Errorf("failed to determine format for extracted TAR: %w", err))
 					continue
 				}
-				
+
 				// Add the extracted collection
 				collections = append(collections, Collection{
 					Name:   collName,
 					Path:   extractedDir,
 					Format: format,
 				})
-				
+
 				log.Debugf("Added extracted TAR collection %s with format %s", collName, format)
 			}
 		}
@@ -294,23 +294,23 @@ func IsCollectionName(name string) bool {
 			break
 		}
 	}
-	
+
 	if firstDigitIndex < 0 {
 		return false // Must start with at least one digit
 	}
-	
+
 	// After the initial digits, there must be a letter
 	if firstDigitIndex+1 >= len(name) {
 		return false // No room for letter after digits
 	}
-	
+
 	letterChar := name[firstDigitIndex+1]
 	if (letterChar < 'A' || letterChar > 'Z') && (letterChar < 'a' || letterChar > 'z') {
 		return false // Middle character must be a letter
 	}
-	
+
 	// Final position(s) must be digits
-	for i := firstDigitIndex+2; i < len(name); i++ {
+	for i := firstDigitIndex + 2; i < len(name); i++ {
 		if name[i] < '0' || name[i] > '9' {
 			return false
 		}
@@ -322,21 +322,21 @@ func IsCollectionName(name string) bool {
 // determineCollectionNameFromContent tries to deduce the collection name by examining files
 func determineCollectionNameFromContent(ctx context.Context, dirPath string) (string, error) {
 	log := trace.FromContext(ctx).WithPrefix("COLLECTION")
-	
+
 	// Read the directory
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read directory: %w", err)
 	}
-	
+
 	// Look for files with pattern like "IMG3A5_0001.PNG" or "3A5_0001.bin"
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		name := entry.Name()
-		
+
 		// Check for PNG files
 		if strings.HasSuffix(strings.ToUpper(name), ".PNG") && strings.HasPrefix(name, "IMG") {
 			// Extract the collection name after "IMG" and before "_"
@@ -346,7 +346,7 @@ func determineCollectionNameFromContent(ctx context.Context, dirPath string) (st
 				return parts[0], nil
 			}
 		}
-		
+
 		// Check for bin files
 		if strings.HasSuffix(name, ".bin") {
 			// Extract the collection name before "_"
@@ -357,108 +357,108 @@ func determineCollectionNameFromContent(ctx context.Context, dirPath string) (st
 			}
 		}
 	}
-	
+
 	return "", fmt.Errorf("could not determine collection name from directory content")
 }
 
 // CollectionReader reads data from a collection
 type CollectionReader struct {
-	Collection      Collection
-	ChunkIndex      int
-	Formatter       Formatter
+	Collection       Collection
+	ChunkIndex       int
+	Formatter        Formatter
 	sortedChunkFiles []string    // Cached list of sorted chunk files in directory
-	tarFile         *os.File     // File handle for TAR files
-	tarReader       *tar.Reader  // TAR reader for streaming chunks
+	tarFile          *os.File    // File handle for TAR files
+	tarReader        *tar.Reader // TAR reader for streaming chunks
 }
 
 // NewCollectionReader creates a new collection reader
 func NewCollectionReader(collection Collection) *CollectionReader {
 	return &CollectionReader{
-		Collection:   collection,
-		ChunkIndex:   1, // Start at chunk 1
-		Formatter:    GetFormatter(collection.Format),
+		Collection: collection,
+		ChunkIndex: 1, // Start at chunk 1
+		Formatter:  GetFormatter(collection.Format),
 	}
 }
 
 // ReadNextChunk reads the next chunk from the collection
 func (cr *CollectionReader) ReadNextChunk(ctx context.Context) ([]byte, error) {
 	log := trace.FromContext(ctx).WithPrefix("COLLECTION-READER")
-	
-	log.Debugf("Reading next chunk %d from collection %s (path: %s)", 
+
+	log.Debugf("Reading next chunk %d from collection %s (path: %s)",
 		cr.ChunkIndex, cr.Collection.Name, cr.Collection.Path)
-	
+
 	// Check if this collection is a TAR file
 	if strings.HasSuffix(cr.Collection.Path, ".tar") {
 		log.Debugf("Collection is a TAR file, using TAR reader")
 		// Read directly from TAR file
 		return cr.readNextChunkFromTar(ctx)
 	}
-	
+
 	// Lazy initialization of sorted chunk files list for directory-based collections
 	if cr.sortedChunkFiles == nil {
 		log.Debugf("Initializing sorted chunk files for collection in directory %s", cr.Collection.Path)
-		
+
 		// Read all files in the directory
 		entries, err := os.ReadDir(cr.Collection.Path)
 		if err != nil {
 			log.Error(fmt.Errorf("failed to read collection directory: %w", err))
 			return nil, fmt.Errorf("failed to read collection directory: %w", err)
 		}
-		
+
 		// Filter for chunk files based on extension
 		var chunkFiles []string
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			
+
 			name := entry.Name()
 			ext := strings.ToUpper(filepath.Ext(name))
-			
+
 			// Check if it's a valid chunk file based on extension
 			if (cr.Collection.Format == FormatPNG && (ext == ".PNG" || ext == ".png")) ||
-			   (cr.Collection.Format == FormatBin && ext == ".bin") ||
-			   (cr.Collection.Format == "" && (ext == ".PNG" || ext == ".png" || ext == ".bin")) {
+				(cr.Collection.Format == FormatBin && ext == ".bin") ||
+				(cr.Collection.Format == "" && (ext == ".PNG" || ext == ".png" || ext == ".bin")) {
 				chunkFiles = append(chunkFiles, name)
 			}
 		}
-		
+
 		// If no chunk files found, return EOF
 		if len(chunkFiles) == 0 {
 			log.Debugf("No chunk files found in collection directory: %s", cr.Collection.Path)
 			return nil, io.EOF
 		}
-		
+
 		// Sort the chunk files to ensure consistent ordering
 		sort.Strings(chunkFiles)
-		
+
 		// Log the sorted files for debugging
 		if len(chunkFiles) > 0 {
-			log.Debugf("Sorted %d chunk files, first: %s, last: %s", 
+			log.Debugf("Sorted %d chunk files, first: %s, last: %s",
 				len(chunkFiles), chunkFiles[0], chunkFiles[len(chunkFiles)-1])
 		}
-		
+
 		// Store the sorted chunk files
 		cr.sortedChunkFiles = chunkFiles
 		log.Debugf("Found and sorted %d chunk files in directory", len(chunkFiles))
 	}
-	
+
 	// Check if we've reached the end of the chunk files
 	if cr.ChunkIndex > len(cr.sortedChunkFiles) {
 		log.Debugf("No more chunks in collection (reached end of sorted files)")
 		return nil, io.EOF
 	}
-	
+
 	// Get the current chunk file
 	chunkFile := cr.sortedChunkFiles[cr.ChunkIndex-1]
 	filePath := filepath.Join(cr.Collection.Path, chunkFile)
-	
+
 	log.Debugf("Reading chunk %d (file: %s) from collection %s", cr.ChunkIndex, chunkFile, cr.Collection.Name)
-	
+
 	// Read the chunk data
 	var data []byte
 	var err error
-	
+
 	// Use the appropriate method to read the data based on file extension
 	ext := strings.ToUpper(filepath.Ext(chunkFile))
 	if ext == ".PNG" || ext == ".png" {
@@ -469,7 +469,7 @@ func (cr *CollectionReader) ReadNextChunk(ctx context.Context) ([]byte, error) {
 			return nil, fmt.Errorf("failed to open chunk file: %w", err)
 		}
 		defer f.Close()
-		
+
 		data, err = ExtractDataFromPNG(f)
 		if err != nil {
 			log.Error(fmt.Errorf("failed to extract data from PNG: %w", err))
@@ -483,15 +483,14 @@ func (cr *CollectionReader) ReadNextChunk(ctx context.Context) ([]byte, error) {
 			return nil, fmt.Errorf("failed to read chunk file: %w", err)
 		}
 	}
-	
+
 	log.Debugf("Successfully read %d bytes from chunk file %s", len(data), chunkFile)
-	
+
 	// Increment the chunk index for the next read
 	cr.ChunkIndex++
-	
+
 	return data, nil
 }
-
 
 // readNextChunkFromTar reads the next chunk directly from a TAR file
 func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, error) {
@@ -500,23 +499,23 @@ func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, e
 	// If this is the first time accessing the TAR file, open it and prepare the reader
 	if cr.tarFile == nil {
 		log.Debugf("Opening TAR file for streaming: %s", cr.Collection.Path)
-		
+
 		// Open the TAR file
 		file, err := os.Open(cr.Collection.Path)
 		if err != nil {
 			log.Error(fmt.Errorf("failed to open TAR file: %w", err))
 			return nil, fmt.Errorf("failed to open TAR file: %w", err)
 		}
-		
+
 		// Store the file handle so we can close it later
 		cr.tarFile = file
-		
+
 		// Create tar reader directly without gzip decompression
 		cr.tarReader = tar.NewReader(file)
-		
+
 		log.Debugf("Set up TAR streaming for collection %s", cr.Collection.Name)
 	}
-	
+
 	// Read and process the next entry from the TAR file
 	for {
 		header, err := cr.tarReader.Next()
@@ -538,23 +537,23 @@ func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, e
 			}
 			return nil, fmt.Errorf("error reading TAR header: %w", err)
 		}
-		
+
 		// Get the file name and extension
 		name := header.Name
 		ext := strings.ToUpper(filepath.Ext(name))
-		
+
 		// Check if it's a valid chunk file based on extension
 		if (cr.Collection.Format == FormatPNG && (ext == ".PNG" || ext == ".png")) ||
-		   (cr.Collection.Format == FormatBin && ext == ".bin") ||
-		   (cr.Collection.Format == "" && (ext == ".PNG" || ext == ".png" || ext == ".bin")) {
-			
-			log.Debugf("Reading chunk %d (file: %s) from TAR stream for collection %s", 
-					   cr.ChunkIndex, name, cr.Collection.Name)
-			
+			(cr.Collection.Format == FormatBin && ext == ".bin") ||
+			(cr.Collection.Format == "" && (ext == ".PNG" || ext == ".png" || ext == ".bin")) {
+
+			log.Debugf("Reading chunk %d (file: %s) from TAR stream for collection %s",
+				cr.ChunkIndex, name, cr.Collection.Name)
+
 			// Read the chunk content
 			var data []byte
 			var err error
-			
+
 			if ext == ".PNG" || ext == ".png" {
 				// For PNG files, extract data from the PNG
 				var buf bytes.Buffer
@@ -563,23 +562,23 @@ func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, e
 					log.Error(fmt.Errorf("failed to read PNG from TAR (read %d bytes): %w", bytesRead, err))
 					continue
 				}
-				
+
 				log.Debugf("Successfully read %d bytes from TAR chunk %s", bytesRead, name)
-				
+
 				// Extract data from the PNG with enhanced error reporting
 				data, err = ExtractDataFromPNG(&buf)
 				if err != nil {
 					// Detailed error logging for PNG extraction failure
 					pngErr := fmt.Errorf("failed to extract data from PNG in TAR: %w", err)
 					log.Error(pngErr)
-					
+
 					// Save a copy of the problematic PNG for debugging if needed
 					if buf.Len() > 0 {
-						log.Debugf("PNG error analysis: PNG size=%d bytes, first 16 bytes: %x", 
-							buf.Len(), 
+						log.Debugf("PNG error analysis: PNG size=%d bytes, first 16 bytes: %x",
+							buf.Len(),
 							buf.Bytes()[:min(16, buf.Len())])
 					}
-					
+
 					// Return the error rather than just continuing, to help with debugging
 					return nil, pngErr
 				}
@@ -591,12 +590,12 @@ func (cr *CollectionReader) readNextChunkFromTar(ctx context.Context) ([]byte, e
 					continue
 				}
 			}
-			
+
 			log.Debugf("Successfully read %d bytes from TAR chunk %s", len(data), name)
-			
+
 			// Increment the chunk index for the next read
 			cr.ChunkIndex++
-			
+
 			return data, nil
 		} else {
 			// Skip this entry but consume its content

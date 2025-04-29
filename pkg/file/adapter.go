@@ -28,7 +28,7 @@ type NamedChunkWriter struct {
 	Ctx       context.Context
 	Formatter Formatter
 	CollPath  string
-	CollName  string  // Use this name for the files instead of basename
+	CollName  string // Use this name for the files instead of basename
 	ChunkNum  int
 	chunkData []byte
 }
@@ -244,7 +244,7 @@ func (cw *NamedChunkWriter) Close() error {
 
 // ChunkReaderAdapter adapts a CollectionReader to io.Reader
 type ChunkReaderAdapter struct {
-	Reader       *CollectionReader  // Standard directory/tar-based reader
+	Reader       *CollectionReader // Standard directory/tar-based reader
 	buffer       []byte
 	offset       int
 	ctx          context.Context
@@ -288,14 +288,14 @@ func (a *ChunkReaderAdapter) Read(p []byte) (int, error) {
 	// If buffer is empty or fully read, get next chunk
 	if a.buffer == nil || a.offset >= len(a.buffer) {
 		collName := a.Reader.Collection.Name
-		
+
 		log.Debugf("Getting next chunk from collection %s (chunk %d)", collName, a.currentChunk)
 
 		// Make sure we reset the reader's chunk index to the one we want
 		// This ensures we only read one chunk at a time
 		a.Reader.ChunkIndex = a.currentChunk
 		chunk, err := a.Reader.ReadNextChunk(a.ctx)
-		
+
 		if err != nil {
 			if err == io.EOF {
 				log.Debugf("Reached end of chunks (EOF) for collection %s", collName)
@@ -316,7 +316,7 @@ func (a *ChunkReaderAdapter) Read(p []byte) (int, error) {
 
 		// Get the current chunk index for logging (subtract 1 because it was already incremented)
 		chunkIndex := a.Reader.ChunkIndex - 1
-		
+
 		log.Debugf("Got chunk %d (%d bytes) from collection %s",
 			chunkIndex, len(chunk), collName)
 

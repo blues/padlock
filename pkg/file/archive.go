@@ -37,10 +37,10 @@ var TarCollection = func(ctx context.Context, collPath string) (string, error) {
 		log.Error(fmt.Errorf("failed to create tar file %s: %w", tarPath, err))
 		return "", fmt.Errorf("failed to create tar file %s: %w", tarPath, err)
 	}
-	
+
 	// Create tar writer directly without gzip compression
 	tarWriter := tar.NewWriter(tarFile)
-	
+
 	// Walk through collection directory and add files to tar
 	err = filepath.Walk(collPath, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
@@ -66,13 +66,13 @@ var TarCollection = func(ctx context.Context, collPath string) (string, error) {
 			return fmt.Errorf("failed to open file %s: %w", path, err)
 		}
 		defer file.Close()
-		
+
 		// Get file information
 		fi, err := file.Stat()
 		if err != nil {
 			return fmt.Errorf("failed to get file info: %w", err)
 		}
-		
+
 		// Create tar header
 		header := &tar.Header{
 			Name:    rel,
@@ -80,12 +80,12 @@ var TarCollection = func(ctx context.Context, collPath string) (string, error) {
 			Size:    fi.Size(),
 			ModTime: fi.ModTime(),
 		}
-		
+
 		// Write header
 		if err := tarWriter.WriteHeader(header); err != nil {
 			return fmt.Errorf("failed to write tar header: %w", err)
 		}
-		
+
 		// Copy file content to tar
 		if _, err := io.Copy(tarWriter, file); err != nil {
 			return fmt.Errorf("failed to write file to tar: %w", err)
@@ -107,7 +107,7 @@ var TarCollection = func(ctx context.Context, collPath string) (string, error) {
 		log.Error(fmt.Errorf("failed to close tar writer: %w", err))
 		return "", fmt.Errorf("failed to close tar writer: %w", err)
 	}
-	
+
 	if err := tarFile.Close(); err != nil {
 		log.Error(fmt.Errorf("failed to close tar file: %w", err))
 		return "", fmt.Errorf("failed to close tar file: %w", err)
@@ -122,7 +122,7 @@ func ExtractTarCollection(ctx context.Context, tarPath string, tempDir string) (
 	log := trace.FromContext(ctx).WithPrefix("TAR")
 
 	log.Debugf("Extracting tar collection: %s", tarPath)
-	
+
 	// Open the tar file
 	file, err := os.Open(tarPath)
 	if err != nil {
@@ -130,7 +130,7 @@ func ExtractTarCollection(ctx context.Context, tarPath string, tempDir string) (
 		return "", fmt.Errorf("failed to open tar file %s: %w", tarPath, err)
 	}
 	defer file.Close()
-	
+
 	// Create a tar reader directly without gzip decompression
 	tarReader := tar.NewReader(file)
 
@@ -154,16 +154,16 @@ func ExtractTarCollection(ctx context.Context, tarPath string, tempDir string) (
 			log.Error(fmt.Errorf("error reading tar header: %w", err))
 			return "", fmt.Errorf("error reading tar header: %w", err)
 		}
-		
+
 		// Get the target path for extraction
 		fpath := filepath.Join(collectionDir, header.Name)
-		
+
 		// Check for path traversal attacks
 		if !strings.HasPrefix(fpath, collectionDir) {
 			log.Error(fmt.Errorf("invalid file path in tar: %s", header.Name))
 			return "", fmt.Errorf("invalid file path in tar: %s", header.Name)
 		}
-		
+
 		// Handle different entry types
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -172,7 +172,7 @@ func ExtractTarCollection(ctx context.Context, tarPath string, tempDir string) (
 				log.Error(fmt.Errorf("failed to create directory %s: %w", fpath, err))
 				return "", fmt.Errorf("failed to create directory %s: %w", fpath, err)
 			}
-			
+
 		case tar.TypeReg:
 			// Create regular file
 			// Ensure the file's directory exists
@@ -180,14 +180,14 @@ func ExtractTarCollection(ctx context.Context, tarPath string, tempDir string) (
 				log.Error(fmt.Errorf("failed to create directory for %s: %w", fpath, err))
 				return "", fmt.Errorf("failed to create directory for %s: %w", fpath, err)
 			}
-			
+
 			log.Debugf("Extracting file: %s", header.Name)
 			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
 			if err != nil {
 				log.Error(fmt.Errorf("failed to create output file %s: %w", fpath, err))
 				return "", fmt.Errorf("failed to create output file %s: %w", fpath, err)
 			}
-			
+
 			// Copy the file content
 			if _, err := io.Copy(outFile, tarReader); err != nil {
 				outFile.Close()
@@ -247,15 +247,15 @@ func TarCollections(ctx context.Context, collections []Collection) ([]string, er
 // TarChunkWriter is an implementation of io.WriteCloser that writes chunks directly to a TAR file
 // instead of temporary files, avoiding the need to write to disk twice
 type TarChunkWriter struct {
-	Ctx        context.Context
-	TarPath    string
-	CollName   string
-	ChunkNum   int
-	Format     Format
-	chunkData  []byte
-	tarFile    *os.File
-	tarWriter  *tar.Writer
-	mutex      sync.Mutex  // Protects concurrent writes to the same tar
+	Ctx       context.Context
+	TarPath   string
+	CollName  string
+	ChunkNum  int
+	Format    Format
+	chunkData []byte
+	tarFile   *os.File
+	tarWriter *tar.Writer
+	mutex     sync.Mutex // Protects concurrent writes to the same tar
 }
 
 // Map of TarChunkWriters by tar path for global access and cleanup
@@ -265,54 +265,54 @@ var tarWriters = make(map[string]*TarChunkWriter)
 // NewTarChunkWriter creates a new TarChunkWriter for streaming chunks directly to a TAR file
 func NewTarChunkWriter(ctx context.Context, tarPath string, collName string, format Format) (*TarChunkWriter, error) {
 	log := trace.FromContext(ctx).WithPrefix("TAR-CHUNK-WRITER")
-	
+
 	// Check if we already have a writer for this tar path
 	tarWriterMutex.Lock()
 	defer tarWriterMutex.Unlock()
-	
+
 	if writer, exists := tarWriters[tarPath]; exists {
 		log.Debugf("Reusing existing TAR writer for collection %s at %s", collName, tarPath)
 		// Always reset chunk data to ensure we don't mix data from previous chunks
 		writer.chunkData = make([]byte, 0)
 		return writer, nil
 	}
-	
+
 	log.Debugf("Creating new TAR writer for collection %s at %s", collName, tarPath)
-	
+
 	// Create/open the tar file
 	var tarFile *os.File
 	var tarWriter *tar.Writer
 	var err error
-	
+
 	// Create parent directory if needed
 	if err := os.MkdirAll(filepath.Dir(tarPath), 0755); err != nil {
 		log.Error(fmt.Errorf("failed to create directory for tar file: %w", err))
 		return nil, fmt.Errorf("failed to create directory for tar file: %w", err)
 	}
-	
+
 	// Create or open the tar file
 	tarFile, err = os.OpenFile(tarPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		log.Error(fmt.Errorf("failed to create/open tar file %s: %w", tarPath, err))
 		return nil, fmt.Errorf("failed to create/open tar file %s: %w", tarPath, err)
 	}
-	
+
 	// Create tar writer directly without gzip compression
 	tarWriter = tar.NewWriter(tarFile)
-	
+
 	writer := &TarChunkWriter{
-		Ctx:        ctx,
-		TarPath:    tarPath,
-		CollName:   collName,
-		Format:     format,
-		chunkData:  make([]byte, 0),
-		tarFile:    tarFile,
-		tarWriter:  tarWriter,
+		Ctx:       ctx,
+		TarPath:   tarPath,
+		CollName:  collName,
+		Format:    format,
+		chunkData: make([]byte, 0),
+		tarFile:   tarFile,
+		tarWriter: tarWriter,
 	}
-	
+
 	// Store the writer in the map for later reuse and cleanup
 	tarWriters[tarPath] = writer
-	
+
 	return writer, nil
 }
 
@@ -320,7 +320,7 @@ func NewTarChunkWriter(ctx context.Context, tarPath string, collName string, for
 func (tw *TarChunkWriter) Write(p []byte) (n int, err error) {
 	tw.mutex.Lock()
 	defer tw.mutex.Unlock()
-	
+
 	tw.chunkData = append(tw.chunkData, p...)
 	return len(p), nil
 }
@@ -328,17 +328,17 @@ func (tw *TarChunkWriter) Write(p []byte) (n int, err error) {
 // validateRandomness performs basic statistical tests on data to ensure it appears random for TarChunkWriter
 func (tw *TarChunkWriter) validateRandomness() error {
 	log := trace.FromContext(tw.Ctx).WithPrefix("RANDOMNESS-CHECK")
-	
+
 	// Skip validation for very small chunks (less than 32 bytes)
 	if len(tw.chunkData) < 32 {
 		log.Debugf("Skipping randomness check for small chunk (%d bytes)", len(tw.chunkData))
 		return nil
 	}
-	
+
 	// This is a simplified version of the randomness check
 	// In a real implementation, this would be more comprehensive
 	// or would call the same checks used in NamedChunkWriter
-	
+
 	// Return nil to allow the operation to proceed
 	return nil
 }
@@ -347,14 +347,14 @@ func (tw *TarChunkWriter) validateRandomness() error {
 func (tw *TarChunkWriter) Close() error {
 	tw.mutex.Lock()
 	defer tw.mutex.Unlock()
-	
+
 	log := trace.FromContext(tw.Ctx).WithPrefix("TAR-CHUNK-WRITER")
-	
+
 	// Validate randomness
 	if err := tw.validateRandomness(); err != nil {
 		log.Error(fmt.Errorf("randomness validation failed: %w", err))
 	}
-	
+
 	// Generate the entry name based on format and collection name
 	var entryName string
 	if tw.Format == FormatPNG {
@@ -362,16 +362,16 @@ func (tw *TarChunkWriter) Close() error {
 	} else {
 		entryName = fmt.Sprintf("%s_%04d.bin", tw.CollName, tw.ChunkNum)
 	}
-	
+
 	log.Debugf("Creating tar entry: %s (size: %d bytes)", entryName, len(tw.chunkData))
-	
+
 	// If using PNG format, convert the data first
 	var data []byte
 	if tw.Format == FormatPNG {
 		// Create a minimal PNG with the data
 		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 		img.Set(0, 0, color.Transparent)
-		
+
 		// Use a separate buffer for each PNG to avoid mixing data
 		var pngBuf bytes.Buffer
 		if err := encodePNGWithData(&pngBuf, img, tw.chunkData); err != nil {
@@ -383,7 +383,7 @@ func (tw *TarChunkWriter) Close() error {
 		// Use raw binary data
 		data = tw.chunkData
 	}
-	
+
 	// Create the tar header
 	header := &tar.Header{
 		Name:    entryName,
@@ -391,27 +391,27 @@ func (tw *TarChunkWriter) Close() error {
 		Size:    int64(len(data)),
 		ModTime: time.Now(),
 	}
-	
+
 	// Write the header to the tar stream
 	if err := tw.tarWriter.WriteHeader(header); err != nil {
 		log.Error(fmt.Errorf("failed to write tar header: %w", err))
 		return fmt.Errorf("failed to write tar header: %w", err)
 	}
-	
+
 	// Write the data to the tar entry
 	if _, err := tw.tarWriter.Write(data); err != nil {
 		log.Error(fmt.Errorf("failed to write data to tar entry: %w", err))
 		return fmt.Errorf("failed to write data to tar entry: %w", err)
 	}
-	
+
 	log.Debugf("Successfully wrote %d bytes to tar entry %s", len(data), entryName)
-	
+
 	// Clear the chunk data after writing to the tar to avoid reusing it
 	tw.chunkData = make([]byte, 0)
-	
+
 	// Don't close the tar writer or file here - they're kept open for additional chunks
 	// They will be closed when all chunks are written
-	
+
 	return nil
 }
 
@@ -419,27 +419,27 @@ func (tw *TarChunkWriter) Close() error {
 func (tw *TarChunkWriter) FinalizeTar() error {
 	tw.mutex.Lock()
 	defer tw.mutex.Unlock()
-	
+
 	log := trace.FromContext(tw.Ctx).WithPrefix("TAR-CHUNK-WRITER")
 	log.Debugf("Finalizing tar file: %s", tw.TarPath)
-	
+
 	// Close the tar writer
 	if err := tw.tarWriter.Close(); err != nil {
 		log.Error(fmt.Errorf("failed to close tar writer: %w", err))
 		return fmt.Errorf("failed to close tar writer: %w", err)
 	}
-	
+
 	// Close the file
 	if err := tw.tarFile.Close(); err != nil {
 		log.Error(fmt.Errorf("failed to close tar file: %w", err))
 		return fmt.Errorf("failed to close tar file: %w", err)
 	}
-	
+
 	// Remove from the map
 	tarWriterMutex.Lock()
 	delete(tarWriters, tw.TarPath)
 	tarWriterMutex.Unlock()
-	
+
 	log.Debugf("Successfully finalized tar file: %s", tw.TarPath)
 	return nil
 }
@@ -449,25 +449,23 @@ func (tw *TarChunkWriter) FinalizeTar() error {
 func FinalizeAllTarWriters(ctx context.Context) error {
 	log := trace.FromContext(ctx).WithPrefix("TAR-CHUNK-WRITER")
 	log.Debugf("Finalizing all TAR writers")
-	
+
 	tarWriterMutex.Lock()
 	writers := make([]*TarChunkWriter, 0, len(tarWriters))
-	paths := make([]string, 0, len(tarWriters))
-	
+
 	// Collect all writers and paths to avoid modifying the map during iteration
-	for path, writer := range tarWriters {
+	for _, writer := range tarWriters {
 		writers = append(writers, writer)
-		paths = append(paths, path)
 	}
 	tarWriterMutex.Unlock()
-	
+
 	if len(writers) == 0 {
 		log.Debugf("No TAR writers to finalize")
 		return nil
 	}
-	
+
 	log.Debugf("Found %d TAR writers to finalize", len(writers))
-	
+
 	// Close all writers
 	var lastErr error
 	for _, writer := range writers {
@@ -478,16 +476,16 @@ func FinalizeAllTarWriters(ctx context.Context) error {
 			log.Debugf("Successfully finalized TAR writer for %s", writer.TarPath)
 		}
 	}
-	
+
 	// Clear the map
 	tarWriterMutex.Lock()
 	tarWriters = make(map[string]*TarChunkWriter)
 	tarWriterMutex.Unlock()
-	
+
 	if lastErr != nil {
 		return fmt.Errorf("failed to finalize one or more TAR writers: %w", lastErr)
 	}
-	
+
 	log.Debugf("Successfully finalized all TAR writers")
 	return nil
 }
@@ -507,11 +505,11 @@ func TarDirectoryContents(ctx context.Context, dirPath string, collName string) 
 		return "", fmt.Errorf("failed to create tar file %s: %w", tarPath, err)
 	}
 	defer tarFile.Close()
-	
+
 	// Create tar writer directly without gzip compression
 	tarWriter := tar.NewWriter(tarFile)
 	defer tarWriter.Close()
-	
+
 	// Keep track of all files we add to the tar (to delete later)
 	var filesToDelete []string
 
@@ -543,13 +541,13 @@ func TarDirectoryContents(ctx context.Context, dirPath string, collName string) 
 			return fmt.Errorf("failed to open file %s: %w", path, err)
 		}
 		defer file.Close()
-		
+
 		// Get file information
 		fi, err := file.Stat()
 		if err != nil {
 			return fmt.Errorf("failed to get file info: %w", err)
 		}
-		
+
 		// Create tar header
 		header := &tar.Header{
 			Name:    rel,
@@ -557,12 +555,12 @@ func TarDirectoryContents(ctx context.Context, dirPath string, collName string) 
 			Size:    fi.Size(),
 			ModTime: fi.ModTime(),
 		}
-		
+
 		// Write header
 		if err := tarWriter.WriteHeader(header); err != nil {
 			return fmt.Errorf("failed to write tar header: %w", err)
 		}
-		
+
 		// Copy file content to tar
 		if _, err := io.Copy(tarWriter, file); err != nil {
 			return fmt.Errorf("failed to write file to tar: %w", err)

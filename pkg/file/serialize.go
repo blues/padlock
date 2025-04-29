@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/blues/padlock/pkg/trace"
 )
@@ -129,138 +130,201 @@ func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.
 
 	log.Debugf("Directory prepared, now reading input stream")
 
-	// Read a small buffer to check if it looks like a tar file
-	// TAR files start with a 512-byte header
-	peekBuf := make([]byte, 512)
-	n, err := r.Read(peekBuf)
-	if err != nil && err != io.EOF {
-		log.Error(fmt.Errorf("error reading from input stream: %w", err))
-		return fmt.Errorf("error reading from input stream: %w", err)
-	}
+	// Process extraction in a streaming manner
+	done := make(chan error)
+	go func() {
+		defer close(done)
 
-	if n < 512 {
-		log.Infof("Input data is small (%d bytes), treating as raw data", n)
+		// First, peek to check the format
+		peekBuf := make([]byte, 512) // TAR header size
+		n, err := io.ReadFull(r, peekBuf)
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			log.Error(fmt.Errorf("error reading from input stream: %w", err))
+			done <- err
+			return
+		}
 
-		// First, try to see if it looks like a gzip-compressed tar file (even if small)
-		if n >= 2 && peekBuf[0] == 0x1f && peekBuf[1] == 0x8b {
-			log.Infof("Detected gzip header, attempting to decompress")
+		// Recreate the full stream with the peeked data
+		fullStream := io.MultiReader(bytes.NewReader(peekBuf[:n]), r)
 
-			// Try to decompress it
-			gzr, err := gzip.NewReader(bytes.NewReader(peekBuf[:n]))
-			if err != nil {
-				log.Error(fmt.Errorf("detected gzip header but failed to create reader: %w", err))
-			} else {
-				// Successfully created a gzip reader, read the decompressed data
-				decompressed, err := io.ReadAll(gzr)
-				gzr.Close()
+		// Small file handling (less than 512 bytes)
+		if n < 512 {
+			log.Infof("Input data is small (%d bytes), treating as raw data", n)
+
+			// Check for gzip header (0x1f, 0x8b)
+			if n >= 2 && peekBuf[0] == 0x1f && peekBuf[1] == 0x8b {
+				log.Infof("Detected gzip header, setting up streaming decompression")
+
+				// Set up streaming decompression
+				gzr, err := gzip.NewReader(fullStream)
 				if err != nil {
-					log.Error(fmt.Errorf("failed to decompress gzip data: %w", err))
+					log.Error(fmt.Errorf("failed to create gzip reader: %w", err))
+					done <- err
+					return
+				}
+				defer gzr.Close()
+
+				// Handle small decompressed data
+				decompBuffer := make([]byte, 4096)
+				bytesRead, err := io.ReadFull(gzr, decompBuffer)
+
+				// Check if it's a full buffer or we hit EOF or unexpected EOF
+				if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+					log.Error(fmt.Errorf("error during initial decompression: %w", err))
+					done <- err
+					return
+				}
+
+				// If what we read looks like a TAR file (>= 512 bytes), treat it as one
+				if bytesRead >= 512 {
+					log.Infof("Decompressed data looks like a TAR file, processing as stream")
+
+					// Process using streaming tar reader
+					tarReader := tar.NewReader(io.MultiReader(bytes.NewReader(decompBuffer[:bytesRead]), gzr))
+					if err := streamTarToDirectory(ctx, outputDir, tarReader, log); err != nil {
+						done <- err
+						return
+					}
 				} else {
-					log.Infof("Successfully decompressed %d bytes to %d bytes", n, len(decompressed))
-
-					// Check if it's a tar file
-					if len(decompressed) >= 512 {
-						log.Infof("Decompressed data is large enough to be a tar file, using tar reader")
-						tarReader := tar.NewReader(bytes.NewReader(decompressed))
-
-						fileCount := 0
-						for {
-							header, err := tarReader.Next()
-							if err == io.EOF {
-								break
-							}
-							if err != nil {
-								log.Error(fmt.Errorf("tar reading error: %w", err))
-								break
-							}
-
-							// Get the output path
-							outPath := filepath.Join(outputDir, header.Name)
-
-							// Create parent directory
-							if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-								log.Error(fmt.Errorf("failed to create directory for %s: %w", outPath, err))
-								continue
-							}
-
-							// Create the file
-							f, err := os.Create(outPath)
-							if err != nil {
-								log.Error(fmt.Errorf("failed to create file %s: %w", outPath, err))
-								continue
-							}
-
-							// Copy the contents
-							written, err := io.Copy(f, tarReader)
-							f.Close()
-							if err != nil {
-								log.Error(fmt.Errorf("failed to write to %s: %w", outPath, err))
-							} else {
-								log.Infof("Extracted %s (%d bytes)", header.Name, written)
-								fileCount++
-							}
-						}
-
-						if fileCount > 0 {
-							log.Infof("Successfully extracted %d files from tar archive", fileCount)
-							return nil
-						}
-					}
-
-					// Not a valid tar or no files extracted, just save the decompressed data
+					// Small non-TAR data, just save it directly
 					outfile := filepath.Join(outputDir, "decoded_output.dat")
-					if err := os.WriteFile(outfile, decompressed, 0644); err != nil {
-						log.Error(fmt.Errorf("failed to write decompressed data: %w", err))
-					} else {
-						log.Infof("Wrote decompressed data to %s (%d bytes)", outfile, len(decompressed))
-						fmt.Printf("\nDecoding completed successfully. Output saved to %s (%d bytes)\n",
-							outfile, len(decompressed))
-						return nil
+					f, err := os.Create(outfile)
+					if err != nil {
+						log.Error(fmt.Errorf("failed to create output file: %w", err))
+						done <- err
+						return
 					}
+
+					// First write what we've already read
+					_, err = f.Write(decompBuffer[:bytesRead])
+					if err != nil {
+						f.Close()
+						log.Error(fmt.Errorf("failed to write decompressed data: %w", err))
+						done <- err
+						return
+					}
+
+					// Then copy the rest
+					written, err := io.Copy(f, gzr)
+					f.Close()
+
+					if err != nil {
+						log.Error(fmt.Errorf("failed to copy decompressed data: %w", err))
+						done <- err
+						return
+					}
+
+					log.Infof("Wrote decompressed data to %s (%d bytes)", outfile, written+int64(bytesRead))
+					fmt.Printf("\nDecoding completed successfully. Output saved to %s (%d bytes)\n",
+						outfile, written+int64(bytesRead))
+				}
+
+				done <- nil
+				return
+			}
+
+			// Small non-compressed file - save directly
+			outfile := filepath.Join(outputDir, "decoded_data.txt")
+
+			// Attempt to detect if this is text or binary
+			isText := true
+			for _, b := range peekBuf[:n] {
+				if b < 32 && b != '\n' && b != '\r' && b != '\t' {
+					isText = false
+					break
 				}
 			}
-		}
 
-		// Save the data directly to a file in the output directory - always use a consistent name
-		outfile := filepath.Join(outputDir, "decoded_data.txt")
-
-		// Attempt to detect if this is text or binary
-		isText := true
-		for _, b := range peekBuf[:n] {
-			if b < 32 && b != '\n' && b != '\r' && b != '\t' {
-				isText = false
-				break
+			if !isText {
+				outfile = filepath.Join(outputDir, "decoded_data.bin")
+				log.Infof("Detected binary data, saving as binary file")
+			} else {
+				log.Infof("Detected text data, saving as text file")
 			}
+
+			f, err := os.Create(outfile)
+			if err != nil {
+				log.Error(fmt.Errorf("failed to create output file: %w", err))
+				done <- err
+				return
+			}
+
+			// First write what we've already read
+			_, err = f.Write(peekBuf[:n])
+			if err != nil {
+				f.Close()
+				log.Error(fmt.Errorf("failed to write data: %w", err))
+				done <- err
+				return
+			}
+
+			// Then copy any remaining data (unlikely for small files, but just in case)
+			written, err := io.Copy(f, r)
+			f.Close()
+
+			if err != nil {
+				log.Error(fmt.Errorf("failed to write data: %w", err))
+				done <- err
+				return
+			}
+
+			totalBytes := written + int64(n)
+			log.Infof("Successfully wrote %d bytes to %s", totalBytes, outfile)
+			fmt.Printf("\nDecoding completed successfully. Output saved to %s (%d bytes)\n", outfile, totalBytes)
+
+			done <- nil
+			return
 		}
 
-		if isText {
-			log.Infof("Detected text data, saving as text file")
-			// If it looks like text, save it as-is
-			if err := os.WriteFile(outfile, peekBuf[:n], 0644); err != nil {
-				log.Error(fmt.Errorf("failed to write decoded text: %w", err))
-				return fmt.Errorf("failed to write decoded text: %w", err)
+		// Check if it looks like a gzip-compressed file
+		if peekBuf[0] == 0x1f && peekBuf[1] == 0x8b {
+			log.Infof("Detected gzip header, setting up streaming decompression pipeline")
+
+			// Set up streaming decompression
+			gzr, err := gzip.NewReader(fullStream)
+			if err != nil {
+				log.Error(fmt.Errorf("failed to create gzip reader: %w", err))
+				done <- err
+				return
+			}
+			defer gzr.Close()
+
+			// Process using streaming tar reader with decompressed data
+			tarReader := tar.NewReader(gzr)
+			if err := streamTarToDirectory(ctx, outputDir, tarReader, log); err != nil {
+				done <- err
+				return
 			}
 		} else {
-			// For binary data, save it as a binary file
-			outfile = filepath.Join(outputDir, "decoded_data.bin")
-			log.Infof("Detected binary data, saving as binary file")
-			if err := os.WriteFile(outfile, peekBuf[:n], 0644); err != nil {
-				log.Error(fmt.Errorf("failed to write decoded binary: %w", err))
-				return fmt.Errorf("failed to write decoded binary: %w", err)
+			// Regular tar file (not compressed)
+			log.Infof("Processing uncompressed tar stream")
+
+			// Set up tar reader directly
+			tarReader := tar.NewReader(fullStream)
+			if err := streamTarToDirectory(ctx, outputDir, tarReader, log); err != nil {
+				done <- err
+				return
 			}
 		}
 
-		log.Infof("Successfully wrote %d bytes to %s", n, outfile)
-		fmt.Printf("\nDecoding completed successfully. Output saved to %s (%d bytes)\n", outfile, n)
-		return nil
-	}
+		done <- nil
+	}()
 
-	// Create a new reader that first returns our peeked data, then the rest
-	combinedReader := io.MultiReader(bytes.NewReader(peekBuf[:n]), r)
-	tr := tar.NewReader(combinedReader)
+	// Wait for extraction to complete
+	err := <-done
+	return err
+}
 
+// streamTarToDirectory extracts a tar stream to a directory using streaming I/O
+// This helper function processes tar entries one by one without loading the entire tar file
+// into memory, making it suitable for very large archives.
+func streamTarToDirectory(ctx context.Context, outputDir string, tr *tar.Reader, log *trace.Tracer) error {
 	fileCount := 0
 	totalBytes := int64(0)
+	progressInterval := 100 // Log progress every N files
+	progressCounter := 0
+	lastProgressTime := time.Now()
+	progressUpdateInterval := 5 * time.Second // Minimum time between progress updates
 
 	// Iterate through tar entries
 	for {
@@ -274,13 +338,6 @@ func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.
 		}
 		if err != nil {
 			log.Error(fmt.Errorf("tar header read error: %w", err))
-			// Create a sample file with the data we've seen
-			samplePath := filepath.Join(outputDir, "invalid_tar_sample.dat")
-			if err := os.WriteFile(samplePath, peekBuf[:n], 0644); err != nil {
-				log.Debugf("Failed to write invalid tar sample: %v", err)
-			} else {
-				log.Debugf("Wrote invalid tar sample to %s", samplePath)
-			}
 			return fmt.Errorf("tar header read error: %w", err)
 		}
 
@@ -289,7 +346,9 @@ func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.
 
 		// Handle directory entries
 		if header.Typeflag == tar.TypeDir {
-			log.Debugf("Creating directory: %s", outPath)
+			if log.IsVerbose() {
+				log.Debugf("Creating directory: %s", outPath)
+			}
 			if err := os.MkdirAll(outPath, os.FileMode(header.Mode)); err != nil {
 				log.Error(fmt.Errorf("failed to create directory %s: %w", outPath, err))
 				return err
@@ -305,7 +364,9 @@ func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.
 		}
 
 		// Create the file for writing
-		log.Debugf("Creating file: %s", outPath)
+		if log.IsVerbose() {
+			log.Debugf("Creating file: %s", outPath)
+		}
 		file, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
 		if err != nil {
 			log.Error(fmt.Errorf("failed to create file %s: %w", outPath, err))
@@ -322,11 +383,34 @@ func DeserializeDirectoryFromStream(ctx context.Context, outputDir string, r io.
 
 		fileCount++
 		totalBytes += n
-		log.Debugf("Extracted: %s (%d bytes)", header.Name, n)
+
+		// Progress logging - don't spam the logs too much for large archives
+		progressCounter++
+		if progressCounter >= progressInterval || time.Since(lastProgressTime) > progressUpdateInterval {
+			log.Infof("Extraction progress: %d files (%s)", fileCount, formatByteSize(totalBytes))
+			progressCounter = 0
+			lastProgressTime = time.Now()
+		} else {
+			log.Infof("Extracted: %s (%d bytes)", header.Name, n)
+		}
 	}
 
-	log.Debugf("Directory deserialization complete: %d files, %d bytes", fileCount, totalBytes)
+	log.Infof("Directory deserialization complete: %d files (%s)", fileCount, formatByteSize(totalBytes))
 	return nil
+}
+
+// formatByteSize formats size in bytes to a human-readable string with units
+func formatByteSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // prepareOutputDirectory ensures the output directory is empty for deserialization

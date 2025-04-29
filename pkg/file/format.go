@@ -157,7 +157,7 @@ func (bf *BinFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 	// First try collection name based approach (like "3A5_0001.bin")
 	// Then try directory basename approach (like "in1_0001.bin")
 	// Then try just finding any file with the chunk number
-	
+
 	patterns := []string{
 		// Try to match by chunk number using different patterns
 		fmt.Sprintf("*_%04d.bin", chunkNumber),
@@ -171,14 +171,14 @@ func (bf *BinFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 			log.Debugf("Error searching for pattern %s: %v", pattern, err)
 			continue
 		}
-		
+
 		if len(matches) > 0 {
 			foundPath = matches[0]
 			log.Debugf("Found matching chunk file: %s", foundPath)
 			break
 		}
 	}
-	
+
 	// If no file found through patterns, try scanning directory for chunk number
 	if foundPath == "" {
 		entries, err := os.ReadDir(collectionPath)
@@ -186,7 +186,7 @@ func (bf *BinFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 			log.Error(fmt.Errorf("failed to read directory: %w", err))
 			return nil, fmt.Errorf("failed to read directory: %w", err)
 		}
-		
+
 		chunkNumStr := fmt.Sprintf("_%04d.bin", chunkNumber)
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), chunkNumStr) {
@@ -204,7 +204,7 @@ func (bf *BinFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 			log.Error(fmt.Errorf("failed to read directory: %w", err))
 			return nil, fmt.Errorf("failed to read directory: %w", err)
 		}
-		
+
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".bin") {
 				foundPath = filepath.Join(collectionPath, entry.Name())
@@ -298,7 +298,7 @@ func (pf *PngFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 	// First try collection name based approach (like "IMG3A5_0001.PNG")
 	// Then try directory basename approach (like "IMGin1_0001.PNG")
 	// Then try just finding any file with the chunk number
-	
+
 	patterns := []string{
 		// Try to match by chunk number using different patterns
 		fmt.Sprintf("*_%04d.PNG", chunkNumber),
@@ -313,14 +313,14 @@ func (pf *PngFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 			log.Debugf("Error searching for pattern %s: %v", pattern, err)
 			continue
 		}
-		
+
 		if len(matches) > 0 {
 			foundPath = matches[0]
 			log.Debugf("Found matching chunk file: %s", foundPath)
 			break
 		}
 	}
-	
+
 	// If no file found through patterns, try scanning directory for chunk number
 	if foundPath == "" {
 		entries, err := os.ReadDir(collectionPath)
@@ -328,16 +328,16 @@ func (pf *PngFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 			log.Error(fmt.Errorf("failed to read directory: %w", err))
 			return nil, fmt.Errorf("failed to read directory: %w", err)
 		}
-		
+
 		// Try both uppercase and lowercase PNG extensions
 		chunkNumStrUpper := fmt.Sprintf("_%04d.PNG", chunkNumber)
 		chunkNumStrLower := fmt.Sprintf("_%04d.png", chunkNumber)
-		
+
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			
+
 			name := entry.Name()
 			if strings.HasSuffix(name, chunkNumStrUpper) || strings.HasSuffix(name, chunkNumStrLower) {
 				foundPath = filepath.Join(collectionPath, name)
@@ -354,12 +354,12 @@ func (pf *PngFormatter) ReadChunk(ctx context.Context, collectionPath string, co
 			log.Error(fmt.Errorf("failed to read directory: %w", err))
 			return nil, fmt.Errorf("failed to read directory: %w", err)
 		}
-		
+
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			
+
 			name := strings.ToUpper(entry.Name())
 			if strings.HasSuffix(name, ".PNG") {
 				foundPath = filepath.Join(collectionPath, entry.Name())
@@ -409,9 +409,9 @@ func GetFormatter(format Format) Formatter {
 // rather than the basename of the directory path
 func WriteNamedChunk(ctx context.Context, formatter Formatter, dirPath string, collName string, chunkNumber int, data []byte) error {
 	log := trace.FromContext(ctx).WithPrefix("NAMED-CHUNK")
-	
+
 	var fname string
-	
+
 	// Generate the filename based on formatter type and collection name (not path)
 	switch formatter.(type) {
 	case *BinFormatter:
@@ -421,15 +421,15 @@ func WriteNamedChunk(ctx context.Context, formatter Formatter, dirPath string, c
 	default:
 		return fmt.Errorf("unsupported formatter type")
 	}
-	
+
 	fp := filepath.Join(dirPath, fname)
 	log.Debugf("Writing named chunk %d to file: %s", chunkNumber, fp)
-	
+
 	if err := os.MkdirAll(filepath.Dir(fp), 0755); err != nil {
 		log.Error(fmt.Errorf("failed to create chunk directory: %w", err))
 		return fmt.Errorf("failed to create chunk directory: %w", err)
 	}
-	
+
 	// Use the appropriate method to write the chunk data
 	switch formatter.(type) {
 	case *BinFormatter:
@@ -440,17 +440,17 @@ func WriteNamedChunk(ctx context.Context, formatter Formatter, dirPath string, c
 			return fmt.Errorf("failed to open chunk file: %w", err)
 		}
 		defer file.Close()
-		
+
 		if _, werr := file.Write(data); werr != nil {
 			log.Error(fmt.Errorf("failed to write chunk data: %w", werr))
 			return fmt.Errorf("failed to write chunk data: %w", werr)
 		}
-		
+
 		if err := file.Sync(); err != nil {
 			log.Error(fmt.Errorf("failed to sync chunk file: %w", err))
 			return fmt.Errorf("failed to sync chunk file: %w", err)
 		}
-		
+
 	case *PngFormatter:
 		// Create a PNG file with the data
 		file, err := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -459,7 +459,7 @@ func WriteNamedChunk(ctx context.Context, formatter Formatter, dirPath string, c
 			return fmt.Errorf("failed to open PNG file %s: %w", fp, err)
 		}
 		defer file.Close()
-		
+
 		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 		img.Set(0, 0, color.Transparent)
 		if err := encodePNGWithData(file, img, data); err != nil {
@@ -468,13 +468,13 @@ func WriteNamedChunk(ctx context.Context, formatter Formatter, dirPath string, c
 			log.Error(fmt.Errorf("failed to encode PNG with data for %s: %w", fp, err))
 			return fmt.Errorf("failed to encode PNG with data for %s: %w", fp, err)
 		}
-		
+
 		if err := file.Sync(); err != nil {
 			log.Error(fmt.Errorf("failed to sync PNG file: %w", err))
 			return fmt.Errorf("failed to sync PNG file: %w", err)
 		}
 	}
-	
+
 	log.Debugf("Successfully wrote %d bytes to chunk file", len(data))
 	return nil
 }
@@ -567,123 +567,123 @@ func encodePNGWithData(w io.Writer, img image.Image, data []byte) error {
 //   - No decryption is performed (that happens later in the pad decoding process)
 //   - Fails gracefully if the PNG doesn't contain the expected chunk
 func ExtractDataFromPNG(r io.Reader) ([]byte, error) {
-    // Get tracer from context if provided, otherwise create a new one with normal level
-    var log *trace.Tracer
-    
-    // Check if r is a traceable reader with context
-    type contextReader interface {
-        Context() context.Context
-    }
-    
-    if cr, ok := r.(contextReader); ok && cr.Context() != nil {
-        // Use context from reader
-        log = trace.FromContext(cr.Context()).WithPrefix("PNG-EXTRACTOR")
-    } else {
-        // Create a tracer with normal level to avoid verbose output unless verbose mode is on
-        log = trace.NewTracer("PNG-EXTRACTOR", trace.LogLevelNormal)
-    }
+	// Get tracer from context if provided, otherwise create a new one with normal level
+	var log *trace.Tracer
 
-    // Use IsVerbose instead of a level check
-    if log.IsVerbose() {
-        log.Debugf("Reading PNG data from source...")
-    }
-    
-    all, err := io.ReadAll(r)
-    if err != nil {
-        log.Error(fmt.Errorf("failed to read PNG data: %w", err))
-        return nil, fmt.Errorf("read PNG data: %w", err)
-    }
-    
-    if log.IsVerbose() {
-        log.Debugf("Read %d bytes of PNG data", len(all))
-    }
-    
-    // Basic PNG signature validation
-    if len(all) < 8 || !bytes.Equal(all[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
-        log.Error(fmt.Errorf("invalid PNG signature"))
-        return nil, fmt.Errorf("invalid PNG signature")
-    }
-    
-    // Look for our custom chunk
-    chunkType := []byte("rAWd")
-    chunkPos := bytes.Index(all, chunkType)
-    if chunkPos == -1 {
-        log.Error(fmt.Errorf("'rAWd' chunk not found in %d bytes of data", len(all)))
-        return nil, fmt.Errorf("'rAWd' chunk not found")
-    }
-    
-    if log.IsVerbose() {
-        log.Debugf("Found 'rAWd' chunk at position %d", chunkPos)
-    }
-    
-    if chunkPos < 4 {
-        log.Error(fmt.Errorf("invalid structure, chunk at offset %d (less than 4)", chunkPos))
-        return nil, fmt.Errorf("invalid structure, chunk at offset <4")
-    }
-    
-    // Extract and validate chunk length
-    lengthBuf := all[chunkPos-4 : chunkPos]
-    length := binary.BigEndian.Uint32(lengthBuf)
-    
-    if log.IsVerbose() {
-        log.Debugf("Chunk length from header: %d bytes", length)
-    }
-    
-    // Calculate positions for data extraction
-    dataStart := chunkPos + len(chunkType)
-    dataEnd := dataStart + int(length)
-    
-    // Validate data boundaries
-    if dataEnd > len(all) {
-        log.Error(fmt.Errorf("invalid PNG chunk length %d, exceeds available data (%d bytes)", length, len(all) - dataStart))
-        return nil, fmt.Errorf("invalid PNG chunk length %d, exceeds available data", length)
-    }
-    
-    // Extract the actual data
-    extracted := all[dataStart:dataEnd]
-    
-    if log.IsVerbose() {
-        log.Debugf("Extracted %d bytes of chunk data", len(extracted))
-    }
-    
-    // Validate CRC
-    crcPos := dataEnd
-    if crcPos+4 > len(all) {
-        log.Error(fmt.Errorf("invalid chunk: no CRC found (needed at position %d, but data only %d bytes)", crcPos+4, len(all)))
-        return nil, fmt.Errorf("invalid chunk: no CRC found")
-    }
-    
-    expectedCRC := binary.BigEndian.Uint32(all[crcPos : crcPos+4])
-    
-    crcCalc := crc32.NewIEEE()
-    crcCalc.Write(chunkType)
-    crcCalc.Write(extracted)
-    calculatedCRC := crcCalc.Sum32()
-    
-    if log.IsVerbose() {
-        log.Debugf("Expected CRC from PNG: 0x%08x", expectedCRC)
-        log.Debugf("Calculated CRC: 0x%08x", calculatedCRC)
-    }
-    
-    if calculatedCRC != expectedCRC {
-        // Detailed error for CRC mismatch showing both values
-        log.Error(fmt.Errorf("CRC mismatch in 'rAWd' chunk: expected 0x%08x, calculated 0x%08x", expectedCRC, calculatedCRC))
-        
-        // Additional diagnostics for corruption analysis
-        if log.IsVerbose() {
-            if len(extracted) > 20 {
-                log.Debugf("Data prefix (first 20 bytes): %x", extracted[:20])
-            } else if len(extracted) > 0 {
-                log.Debugf("Data (all %d bytes): %x", len(extracted), extracted)
-            }
-        }
-        
-        return nil, fmt.Errorf("CRC mismatch in 'rAWd' chunk")
-    }
-    
-    if log.IsVerbose() {
-        log.Debugf("CRC verified successfully, returning %d bytes of data", len(extracted))
-    }
-    
-    return extracted, nil
+	// Check if r is a traceable reader with context
+	type contextReader interface {
+		Context() context.Context
+	}
+
+	if cr, ok := r.(contextReader); ok && cr.Context() != nil {
+		// Use context from reader
+		log = trace.FromContext(cr.Context()).WithPrefix("PNG-EXTRACTOR")
+	} else {
+		// Create a tracer with normal level to avoid verbose output unless verbose mode is on
+		log = trace.NewTracer("PNG-EXTRACTOR", trace.LogLevelNormal)
+	}
+
+	// Use IsVerbose instead of a level check
+	if log.IsVerbose() {
+		log.Debugf("Reading PNG data from source...")
+	}
+
+	all, err := io.ReadAll(r)
+	if err != nil {
+		log.Error(fmt.Errorf("failed to read PNG data: %w", err))
+		return nil, fmt.Errorf("read PNG data: %w", err)
+	}
+
+	if log.IsVerbose() {
+		log.Debugf("Read %d bytes of PNG data", len(all))
+	}
+
+	// Basic PNG signature validation
+	if len(all) < 8 || !bytes.Equal(all[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+		log.Error(fmt.Errorf("invalid PNG signature"))
+		return nil, fmt.Errorf("invalid PNG signature")
+	}
+
+	// Look for our custom chunk
+	chunkType := []byte("rAWd")
+	chunkPos := bytes.Index(all, chunkType)
+	if chunkPos == -1 {
+		log.Error(fmt.Errorf("'rAWd' chunk not found in %d bytes of data", len(all)))
+		return nil, fmt.Errorf("'rAWd' chunk not found")
+	}
+
+	if log.IsVerbose() {
+		log.Debugf("Found 'rAWd' chunk at position %d", chunkPos)
+	}
+
+	if chunkPos < 4 {
+		log.Error(fmt.Errorf("invalid structure, chunk at offset %d (less than 4)", chunkPos))
+		return nil, fmt.Errorf("invalid structure, chunk at offset <4")
+	}
+
+	// Extract and validate chunk length
+	lengthBuf := all[chunkPos-4 : chunkPos]
+	length := binary.BigEndian.Uint32(lengthBuf)
+
+	if log.IsVerbose() {
+		log.Debugf("Chunk length from header: %d bytes", length)
+	}
+
+	// Calculate positions for data extraction
+	dataStart := chunkPos + len(chunkType)
+	dataEnd := dataStart + int(length)
+
+	// Validate data boundaries
+	if dataEnd > len(all) {
+		log.Error(fmt.Errorf("invalid PNG chunk length %d, exceeds available data (%d bytes)", length, len(all)-dataStart))
+		return nil, fmt.Errorf("invalid PNG chunk length %d, exceeds available data", length)
+	}
+
+	// Extract the actual data
+	extracted := all[dataStart:dataEnd]
+
+	if log.IsVerbose() {
+		log.Debugf("Extracted %d bytes of chunk data", len(extracted))
+	}
+
+	// Validate CRC
+	crcPos := dataEnd
+	if crcPos+4 > len(all) {
+		log.Error(fmt.Errorf("invalid chunk: no CRC found (needed at position %d, but data only %d bytes)", crcPos+4, len(all)))
+		return nil, fmt.Errorf("invalid chunk: no CRC found")
+	}
+
+	expectedCRC := binary.BigEndian.Uint32(all[crcPos : crcPos+4])
+
+	crcCalc := crc32.NewIEEE()
+	crcCalc.Write(chunkType)
+	crcCalc.Write(extracted)
+	calculatedCRC := crcCalc.Sum32()
+
+	if log.IsVerbose() {
+		log.Debugf("Expected CRC from PNG: 0x%08x", expectedCRC)
+		log.Debugf("Calculated CRC: 0x%08x", calculatedCRC)
+	}
+
+	if calculatedCRC != expectedCRC {
+		// Detailed error for CRC mismatch showing both values
+		log.Error(fmt.Errorf("CRC mismatch in 'rAWd' chunk: expected 0x%08x, calculated 0x%08x", expectedCRC, calculatedCRC))
+
+		// Additional diagnostics for corruption analysis
+		if log.IsVerbose() {
+			if len(extracted) > 20 {
+				log.Debugf("Data prefix (first 20 bytes): %x", extracted[:20])
+			} else if len(extracted) > 0 {
+				log.Debugf("Data (all %d bytes): %x", len(extracted), extracted)
+			}
+		}
+
+		return nil, fmt.Errorf("CRC mismatch in 'rAWd' chunk")
+	}
+
+	if log.IsVerbose() {
+		log.Debugf("CRC verified successfully, returning %d bytes of data", len(extracted))
+	}
+
+	return extracted, nil
 }
