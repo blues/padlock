@@ -1044,11 +1044,8 @@ func DecodeDirectory(ctx context.Context, cfg DecodeConfig) error {
 		// Continue anyway, as the pipe might already be closed by the deserialization goroutine
 	}
 
-	// In test environment, wait with a shorter timeout, but in production wait with a longer timeout
-	timeoutDuration := 30 * time.Second
-	if os.Getenv("GO_TEST") != "" || (ctx.Value(trace.TracerKey{}) != nil && strings.Contains(ctx.Value(trace.TracerKey{}).(*trace.Tracer).GetPrefix(), "TEST")) {
-		timeoutDuration = 3 * time.Second
-	}
+	// Determine appropriate timeout duration based on environment
+	timeoutDuration := getTimeoutDuration(ctx)
 
 	select {
 	case <-done:
@@ -1305,4 +1302,30 @@ func VerifyCollectionIntegrity(ctx context.Context, collections []file.Collectio
 		log.Infof("Verification complete: No files were found to verify")
 		return nil
 	}
+}
+
+// getTimeoutDuration returns an appropriate timeout duration based on the execution environment
+// In test environments, it returns a shorter timeout (3 seconds)
+// In production environments, it returns a longer timeout (30 seconds)
+func getTimeoutDuration(ctx context.Context) time.Duration {
+	// Default timeout for production environments
+	timeoutDuration := 30 * time.Second
+	
+	// Check if we're in a test environment
+	isTestEnv := os.Getenv("GO_TEST") != ""
+	
+	// Also check if the context contains a tracer with a TEST prefix
+	if !isTestEnv && ctx.Value(trace.TracerKey{}) != nil {
+		tracer, ok := ctx.Value(trace.TracerKey{}).(*trace.Tracer)
+		if ok && tracer != nil {
+			isTestEnv = strings.Contains(tracer.GetPrefix(), "TEST")
+		}
+	}
+	
+	// Use shorter timeout for test environments
+	if isTestEnv {
+		timeoutDuration = 3 * time.Second
+	}
+	
+	return timeoutDuration
 }

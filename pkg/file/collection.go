@@ -248,14 +248,6 @@ func FindCollections(ctx context.Context, inputDir string) ([]Collection, string
 	return collections, tempDir, nil
 }
 
-// ZipCollections is a compatibility function that calls TarCollections
-// This exists for backward compatibility with any code that might call ZipCollections
-func ZipCollections(ctx context.Context, collections []Collection) ([]string, error) {
-	log := trace.FromContext(ctx).WithPrefix("COLLECTION")
-	log.Infof("ZipCollections function is deprecated, using TarCollections instead")
-	return TarCollections(ctx, collections)
-}
-
 // DetermineCollectionFormat determines the format of a collection by looking at its files
 // Exported so it can be used by other packages
 func DetermineCollectionFormat(collPath string) (Format, error) {

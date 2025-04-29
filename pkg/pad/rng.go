@@ -14,16 +14,6 @@ import (
 	"github.com/blues/padlock/pkg/trace"
 )
 
-// WithQuantumEnabled is a context helper for controlling RNG behavior
-func WithQuantumEnabled(ctx context.Context, enabled bool) context.Context {
-	return ctx
-}
-
-// IsQuantumEnabled checks if a specific RNG mode is enabled
-func IsQuantumEnabled(ctx context.Context) bool {
-	return false
-}
-
 // RNG defines the core interface for all random number generators in the padlock system.
 //
 // This interface abstracts the generation of random bytes, allowing different

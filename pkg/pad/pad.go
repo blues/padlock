@@ -132,10 +132,6 @@ func PadInit(ctx context.Context, p *Pad, totalCopies, requiredCopies int) error
 	if totalCopies < 2 || totalCopies > 26 {
 		return fmt.Errorf("totalCopies must be between 2 and 26, got %d", totalCopies)
 	}
-	// Validate parameters to ensure they meet the requirements of the threshold scheme
-	if totalCopies < 2 || totalCopies > 26 {
-		return fmt.Errorf("totalCopies must be between 2 and 26, got %d", totalCopies)
-	}
 	if requiredCopies < 2 {
 		return fmt.Errorf("requiredCopies must be at least 2, got %d", requiredCopies)
 	}
